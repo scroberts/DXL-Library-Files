@@ -1,0 +1,462 @@
+/* 
+CRUtils
+
+Description:	This file contains several utility routines used by the DXL script named
+		"processModCRs" in processing CRs for TMT DRD modules in DOORS.
+
+Routines:	The routines contained in this file are...
+		- getCurrentCRIDstatus
+		- getNumberOfCRIDs
+		- getCurrentCRID
+		- resetRecordIterator
+		- setCurrentRecordIterator
+		- getNextRecord
+		- CRIDisOK
+		- initRecords
+		- deleteCRID
+		- setCurrentCRID
+		- addRecord
+		- extractTMTID
+
+Dependencies:	This file draws upon the include file named CRgenutils.dxl.
+
+*/
+#include "CRgenutils.dxl"
+
+Skip CRrecords = null
+Skip CRstatus = null
+int CRncrids = 0
+string CRcurrentCRID = ""
+string CRcurrentCRIDstatus = ""
+int CRnrecords = 0
+int CRcurrentRecordNo = -1   // leave this -1 for undefined
+int CRnextRecordNo = -1
+string CRcurrentRecord
+string CRcurrentRecordKey
+Skip CRcurrentObjects = null
+string CRcurrentRecordIDs[1000]   // this is bogus but necessary.  
+                                 // Never can have more than 200
+
+// initialize some variables
+string CR_smname = ""
+int    CR_absno = -1
+string CR_State = ""
+string CR_doStatus = ""
+
+
+Regexp CRre = regexp "ADMIN+|CR[0-9]+$"
+Regexp CRrePart = regexp "^CR[0-9]+"
+Regexp CRreEmbed = regexp "CR[0-9]+"
+
+
+string getCurrentCRIDstatus()
+{
+  return CRcurrentCRIDstatus
+}
+
+
+int getNumberOfCRIDs()
+{
+  return CRncrids
+}
+
+
+int  getNumberOfRecords ()
+{
+  return CRnrecords
+}
+
+
+string getCurrentCRID ()
+{
+  return CRcurrentCRID 
+}
+
+
+void resetRecordIterator ()
+{
+  CRcurrentRecordNo = -1
+  CRnextRecordNo = 0
+}
+
+
+bool setCurrentRecordIterator (int i)
+{
+  if (i < 0 or i >= CRnrecords)
+  {
+    print "setCurrentRecordIterator(" i ") arg out of range\n"
+    return false
+  }
+  else 
+  {  
+    CRcurrentRecordNo = i
+  }
+}
+
+
+// getNextRecord is a "next" operation - it advances the iterator
+
+string getNextRecord ()
+{
+  if (null CRcurrentCRID || CRnextRecordNo == -1)
+  {
+    print "getNextRecord() called with no current CRID defined\n"
+    return ""
+  }
+  if (CRnextRecordNo >= CRnrecords)
+  {
+    resetRecordIterator()
+    return ""
+  }
+  else
+  {
+    CRcurrentRecordNo = CRnextRecordNo
+    CRnextRecordNo++   // won't use this again this time around
+    CRcurrentRecordKey = CRcurrentRecordIDs[CRcurrentRecordNo]
+    
+    if (find (CRcurrentObjects, CRcurrentRecordKey, CRcurrentRecord))	// find this entry in skip list CRcurrentObjects
+    {
+      // record has smname, absno, recordcrid, CRState, doStatus
+      // don't need recordcrid
+      string fields[]
+      fields = split (CRcurrentRecord, "\t")  // uses custom split routine and may not work as planned
+      CR_smname = fields[0]
+      CR_absno = intOf(fields[1])
+      CR_State = fields[3]
+      CR_doStatus = fields[4]   // record just in case
+      // what else to do if successful?
+    }
+    else { CRcurrentRecord = "" }
+    return CRcurrentRecord
+  }
+}
+
+// A CRID is ok IFF the string is ^CR\d+$ or ^CR\d+\n$
+// Anything else requires that we look for any embedded CR\d+ and throw 
+// away any that are found.  That's two steps - can't return a list 
+// baddies, or one good, with a bool.
+
+bool CRIDisOK(string crid)
+{
+  // first just cut of new-lines at the end.  After that, there should
+  // only be a single CR\d+ in the string, and that's all.
+  string testcrid = crid
+  int offset = 0 
+  int len = 0 
+  if (findPlainText (crid, "\n", offset, len, true, false))
+  {
+    if (offset == length(crid)-1)
+    {
+      testcrid = 	crid [0:offset-1]
+    }
+    else
+    {
+      return false     // a newline anyplace other than end is a fail
+    }
+  }
+  if (! CRre testcrid ) return false   // test against new-line-less version
+  return true
+}
+
+bool initRecords ()    // return true OK false not OK   - do we need this?
+{
+  CRrecords = createString
+  if (null CRrecords) return false
+  CRstatus = createString
+  if (null CRstatus) return false
+  return true
+}
+
+bool deleteCRID (string crid)
+{
+  // It should be OK to just delete the main record, don't care if 
+  // subsequent ones hang around afterward.  Or is it a memory leak in
+  // good ol' DXL?  I.e., does it continue until you quit DOORS client?
+  bool r1 = delete (CRrecords, crid)
+  bool r2 = delete (CRstatus, crid)
+  if (! r1) print "deleteCRID couldn't delete CRrecords for '" crid "'\n"
+  if (! r2) print "deleteCRID couldn't delete CRstatus for '" crid "'\n"
+  return ( r1 && r2)
+}
+
+bool setCurrentCRID (string crid)
+{
+  CRcurrentCRID = crid     // unset this if failure
+  Skip currentobjects
+  if (find (CRrecords, crid, currentobjects))
+  {
+    if (find (CRstatus, crid, CRcurrentCRIDstatus))
+    {
+      // if we find it it should be OK
+    }
+    else
+    {
+      print "WARNING: Couldn't get current crid status for some reason, setting bad\n"
+      CRcurrentCRIDstatus = "CR_NO_STATUS"
+    }
+
+    // find out the number of records here 
+
+    int n = 0
+    string reckey
+    for reckey in currentobjects do { n++ }		// count records in currentobjects
+    CRcurrentCRID = crid
+    CRcurrentObjects = currentobjects
+    CRnrecords = n
+    if (CRnrecords > 1000)
+    {
+      print "WE CANNOT HAVE MORE THAN 1000 RECORDS for a CRID.  Aborting.\n"
+      halt
+    }
+    CRnextRecordNo = 0
+    CRcurrentRecordNo = -1
+    CRcurrentRecord = ""
+    int i = 0
+
+    // stick objects into a string array so we can sort
+    // then later we can display the list in a dialog box in alphabetic order
+    string ids[n]
+    for reckey in currentobjects do 
+    {
+      ids[i] = (string key CRcurrentObjects)
+      i++
+    }
+    // We sort so that at least the modules are in alphabetical order,
+    // which means we can do all of one module before going on to the next.
+    // But there's no easy way to sort by absno, so 100 will be before 99
+    sort ids
+    for (i = 0 ; i < n ; i++)
+    {
+      CRcurrentRecordIDs[i] =ids[i]	// copy sorted list into CRcurrentRecordIDs array
+    }
+    return true
+  }
+  else		// did not find this crid in the CRstatus skip list
+  {
+    print "Couldn't set current CRID to '" crid "'\n"
+    CRcurrentCRID = null
+    CRnrecords = 0
+    CRnextRecordNo = -1
+    CRcurrentRecordNo = -1
+    CRCurrentRecord = ""
+    return false
+  }
+}
+    
+
+  
+// addRecord does everything needed from object o.  Too bad there doesn't seem to 
+// be a way to get the parent module from the Object.
+// Return is true if everything went OK, whether or not there was a CRID to be
+// added.  False means there was an error of some sort.
+//   Warning - there's no checking here to see if the attributes are defined.  It's
+//   assumed that addRecord won't be called unless the module has the objects.
+
+bool  addRecord (string smname, Object o)
+{
+  bool returnstatus = true    // start off assuming OK
+  int absno = o."Absolute Number"
+  string crid = o."CR ID"
+
+	string CRState = o."CR State"
+
+  string newrecord = ""
+  if (crid != "")
+  {
+    bool CRIDOK = CRIDisOK (crid)
+// print smname "/" absno " CRID = '" crid "' is OK? " CRIDOK "\n"
+		// need the format of what we're recording.
+		//  smname\tabsno\tCRState\t(ERROR|DONOTHING|SKIP|OK)
+		//    CRID_ERROR - something's wrong, we won't do this CRID at all
+		//    DONOTHING  - apparently still incomplete disposition, don't do 
+		//                 this CRID at all
+		//    SKIP       - we won't do this OBJ for this CRID.
+		//    OK         - we can process this CRID
+		// to do anything, all affected objects must have either CR_SKIP or CR_OK.  
+		string doStatus = "CR_OK"
+		string cridkey = crid   // we use this as a key for the crid within the 
+		                        // individual record
+		string recordcrid = quotenewline(crid)  // Use this for a new-line-less 
+		                                        // display of crid
+		if (!CRIDOK) 
+		{
+		  // if there are multiple CRIDs in this crid, we have to throw them
+		  // all away.  We'll use the CRstatus skip list to do so.
+		  // But we also need a set of rationales for why a CRID's no good.
+		  //  OK, CRstatus should hold string CR_CRID_OK unless there's a problem, 
+		  // in which case we should concatenate the error into the string.
+      //  
+      //   cridstatus   stored in CRstatus    defines overall status of a CRID
+      //   doStatus     stored in CRobjects   defines status of individual
+      //                                      record of a CRID.
+
+ 		  doStatus = "CR_CRID_ERROR"  // needed ?
+ 		  // OK, something's wrong and doStatus records that fact.  But what? Any
+ 		  // CRIDs we can extract from this crid string needs to be flagged as 
+ 		  // inoperable: we won't allow any actual modifications based 
+ 		  // on this (these) CRID (CRIDs).
+		  // Can we get anything out of this?  use a Regexp
+		  string tmpcrid = crid
+		  while (CRreEmbed tmpcrid)
+		  {
+		    // FOUND SOMETHING LIKE A CRID
+		    string foundcrid = tmpcrid[match 0]
+// print "Embedded, foundcrid = '" foundcrid "'\n"
+		    int endcrid = end 0
+		    tmpcrid = tmpcrid[endcrid:]
+		    // We need to mark foundcrid as bad
+		    string errmessage = " - Ill-formed CRID string '" recordcrid //-
+		                   "', module '" smname "' absno " absno ""
+		    string oldstat
+		    string newstat
+		    if (find (CRstatus, foundcrid, oldstat))
+		    {
+		      delete (CRstatus, foundcrid)   // yay for DXL
+// print "Embedded, oldstat = '" oldstat "' errmessage = '" errmessage "'\n"
+		      newstat = oldstat "\n" errmessage
+		    }
+		    else 
+		    {
+// print "Embedded, adding new status '" errmessage "'\n"
+		      newstat = errmessage 
+		    }
+		    put (CRstatus, foundcrid, newstat)
+		  }
+		  return false
+		}
+		// Got this far, we can proceed.
+		
+		// need to do something about CR_SKIP, later...
+		
+		string scrtext = o."CR Text"
+		string errmessage = "undetermined error"
+		if (scrtext == "") 
+		{
+		  doStatus = "CR_DONOTHING"
+		  errmessage = " - Empty CR Text, module '" smname "' absno " absno ""
+		}
+		if (CRState != "Accepted" && CRState != "Rejected") 
+		{
+		  doStatus = "CR_DONOTHING"
+		  errmessage = " - CR State neither Accepted nor Rejected, module '" //-
+		                smname "' absno " absno ""
+		}
+		if (CRState == "Rejected") 
+		{
+		  doStatus = "CR_SKIP"
+		  errmessage = ""  // this is necessary in case we have an already-rejected
+		                  // CRID, in which case the error message will be 
+		                  // concatenated to the accumulating all-CRID errer message
+		}
+
+    string newkey = smname "\t" absno ""
+		newrecord = smname "\t" absno "\t" recordcrid "\t" CRState // -
+		   "\t" doStatus ""
+		
+		// First we record the status for this entire CRID.  It's a function
+		// of the new record's doStatus and the previously accumulated records' 
+		// status.
+		string cridstatus
+		if (find (CRstatus, cridkey, cridstatus))
+		{
+// print "Starting for cridkey '" cridkey "' cridstatus: '" cridstatus "'\n"
+		  // already exists.  Decide what to do, then replace previous cridstatus
+		  // with a new one.  Skip Lists require deleting then re-putting
+		  if (cridstatus == "CR_CRID_OK" && //-
+		        (doStatus == "CR_SKIP" || doStatus == "CR_OK")) 
+		  {
+		    cridstatus = "CR_CRID_OK" 
+		  }
+		  else
+		  {
+		    if (cridstatus == "CR_CRID_OK") cridstatus = errmessage
+		    else if (errmessage != "") 
+		    {
+		      cridstatus = cridstatus "\n" errmessage // concatenate errors
+		    }
+		    else
+		    {
+		      // cridstatus is just cridstatus in this case
+		    }
+		  }
+		  delete (CRstatus, cridkey)
+//  "    PUTTING BACK for cridkey '" cridkey "' cridstatus: '" cridstatus "'\n"
+		  put (CRstatus, cridkey, cridstatus)
+		}
+		else   // CRstatus doesn't yet have an entry for cridkey
+		{
+		  if (doStatus == "CR_SKIP" || doStatus == "CR_OK")
+      {
+		    cridstatus = "CR_CRID_OK" 
+		  }
+		  else
+		  {
+		    cridstatus = errmessage
+		  }
+// print "    NEW cridstatus for cridkey '" cridkey "' status '" cridstatus "'\n"
+		  put (CRstatus, cridkey, cridstatus)
+		}
+
+		// Now we record this record's data.
+    Skip CRObjects = null
+    if (find (CRrecords, cridkey, CRObjects))
+    {
+      // shouldn't have to do anything special if it's already in CRrecords
+    }
+    else   // THIS IS A NEW CRID
+    {
+
+    // have to create a new CRObjects to store in CRrecords
+
+      CRObjects = createString
+      bool putstat = put (CRrecords, cridkey, CRObjects)
+      if (!putstat) 
+      {
+        print "COULD NOT add a new skip keyed '" cridkey "'\n"
+        returnstatus = false
+      }
+      else
+      {
+        CRncrids++
+      }
+    }
+    if (null CRObjects)
+    {
+      print "Couldn't get a CRObjects skip list with key '" cridkey "'\n" 
+      returnstatus = false
+      return returnstatus
+    }
+
+    // One way or the other, we have a CRObjects skip list, so put the
+    // record into it as a string
+
+    bool putstat = put (CRObjects, newkey, newrecord)
+    if (!putstat)
+    {
+      print "COULD NOT add a new record to CRObjects of '" cridkey "'\n"
+      returnstatus = false
+    }
+    else
+    {
+      // print "Added new object record for cridkey '" cridkey "'\n"
+    }
+  }
+  
+  return returnstatus 
+}
+
+
+
+string extractTMTID (string scrtext)
+
+// Extract the TMT ID from the given string.  Is normally given an Object Text or CR Text value.
+
+{
+  if (scrtext[0:0] != "[") return ""		// assumes TMT ID begins in 1st character of field
+  int offset
+  int len
+  if (!findPlainText(scrtext, "]", offset, len, true, false)) return ""		// fail if no "]"
+  if (offset < 2) return ""     // 2 is still ridiculous...			// fail if too short
+  string tmtid = scrtext[1:offset-1]				// extract substring to get TMT ID
+  return tmtid
+}

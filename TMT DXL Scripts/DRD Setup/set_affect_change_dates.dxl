@@ -1,0 +1,21 @@
+// Set Affect Change Dates for All Attributes
+/* 
+ Clear the "Affects Change Dates" for all attributes in this DRD - for TMT
+ 
+ Version:	Set Affect Change Dates v0.dxl
+
+
+
+*/
+
+
+
+
+
+
+//=======================================================================================================
+// Print final output summary
+
+
+print "This is a dummy script.  It DOES NOTHING! \n"
+print "Finished \n"

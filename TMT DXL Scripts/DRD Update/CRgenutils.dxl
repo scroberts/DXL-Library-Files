@@ -1,0 +1,56 @@
+// CRgenutils - not CR specific
+
+string quotenewline (string s)
+{
+  int offset
+  int len
+  // do we have to?
+  if (!findPlainText(s, "\n", offset, len, true, false)) return s
+  string r = s
+  while (findPlainText (r, "\n", offset, len, true, false))
+  {
+    string bef = r[0 : offset-1]
+    string aft = r[offset+len :]
+    r = bef "\\n" aft     // change a newline into a '\n' string
+  }
+  return r
+}
+  
+///////////////////////////////////////////////////////////////
+// sort of like Perl split, except not a regular expression. //
+// Returns an array with all the substrings, not including   //
+// the splitting pattern                                     //
+///////////////////////////////////////////////////////////////
+// Suckily, this doesn't work except in very limited way.  Returning an
+// array means returning the address of the internal data structure
+// declared in this routine.  There's probably a way to do this, e.g.,
+// passing the array in instead, but would have to prove that.  Wouldn't
+// know how to change the size, etc.
+string split (string s, string pat)[]
+{
+  int offset
+  int len
+  string tmps = s
+  int count = 1
+  while (findPlainText (tmps, pat, offset, len, true, false))
+  {
+    count++
+    string second = tmps[offset+len :]
+    tmps = second
+  }
+  string returnstr[count]
+  tmps = s
+  int index = 0
+  while (findPlainText (tmps, pat, offset, len, true, false))
+  {
+    string first = tmps[0 : offset-1]
+    string second = tmps[offset+len :]
+    returnstr[index] = first 
+    tmps = second
+    index++
+  }
+  returnstr[index] = tmps
+  return returnstr
+}
+
+

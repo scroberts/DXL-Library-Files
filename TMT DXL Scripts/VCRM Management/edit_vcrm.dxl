@@ -1,0 +1,584 @@
+// Edit VCRM
+/* This script is to edit VCRM enteries for the TMT project. It should be started from a requirements module (DRD) and expects
+the VAM module to have the same base name with DRD replaced by VAM. Both the DRD and VAM module should be open. This dxl script
+should be started from the DRD module.
+
+Version: edit_vcrm_v2.dxl
+ */
+
+
+void ackAndHalt (string msg)
+{
+  ack msg
+  halt
+}
+
+// GLOBALS: yuck, but we need these in callbacks
+
+
+Skip milestoneOfButton = null
+Skip dropDownOfMilestone = null
+Skip methodDropDownOfMilestone = null
+Skip methodOfMilestone = null
+Skip srcVAMOfMilestone = null
+Skip linkOfMilestone = null
+
+string vamname = null
+Module vam = null
+ModName_ vamref = null
+
+Object vlasttoplevel = null
+Object vamlast = null
+Object oreq = null
+int oreqabsno = 0
+string tmtid = ""
+bool isFirstAddition = true
+
+int numMilestones
+string milestones[100]
+int numMethods
+string methods[100]
+
+////////////////////////////////////////////////////////////////////////////////
+// find the next actual requirement after current object.  We use 
+// TMT ID to decide if something's a requirement.  Could use Paragraph Style.
+// return null if none found before end of module.
+////////////////////////////////////////////////////////////////////////////////
+Object findNextReqt (Object o)
+{
+int count = 0
+print "In findNextReqt\n"
+  Object n = next (o)
+  while (true)
+  {
+    if (null n) return null
+    string tmtid = n."TMT ID"
+    if (tmtid != "") return n   // it's a good one
+    n = next (n)
+count++
+if (count > 10000) halt   // for safety - shouldn't be needed.
+  }
+  ackAndHalt ("Internal error in findNextReqt: how'd we get here?")
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// find the previous actual requirement after current object.  We use 
+// TMT ID to decide if something's a requirement.  Could use Paragraph Style.
+// return null if none found before beginning of module.
+////////////////////////////////////////////////////////////////////////////////
+Object findPrevReqt (Object o)
+{
+int count = 0
+print "In findPrevReqt\n"
+  Object n = previous (o)
+  while (true)
+  {
+    if (null n) return null
+    string tmtid = n."TMT ID"
+    if (tmtid != "") return n   // it's a good one
+    n = previous (n)
+count++
+if (count > 10000) halt   // for safety - shouldn't be needed.
+  }
+  ackAndHalt ("Internal error in findNextReqt: how'd we get here?")
+}
+
+
+pragma runLim,0
+
+bool g_done = false
+DB dialog
+
+
+DBE moveTargetDropDown
+DBE methodDropDown
+
+
+int findinstrings (string strings[], int nstrings, string thestring)
+{
+  int i 
+  for (i = 0 ; i < nstrings ; i++) {
+// print "i=" i " strings[i]=" strings[i] " thestring=" thestring "\n"
+    if (strings[i] == thestring) return i
+  }
+  return -1 
+}
+
+void runAdd (DBE calledFrom) {
+  string milestone
+  bool OK = find (milestoneOfButton, calledFrom, milestone)
+  if (! OK) ackAndHalt ("UH OH COULDN'T FIND A MILESTONE FOR ADD BUTTON!")
+  if (!find (methodDropDownOfMilestone, milestone, methodDropDown)) // -
+      ackAndHalt ("Couldn't find methoddropdown, internal error, bye")
+  string method = get methodDropDown 
+  print "HI ADD milestone = " milestone " method " method "\n"
+  if (method == "") 
+  {
+    ack "Need to specify a method to add a Verification Activity"
+    return
+  }
+  //  1) create a new object in VAM for that milestone
+  //  2) link the new object in VAM to found target in module
+  string ost = "FILL IN SHORT TEST TITLE"
+  string ovd = "FILL IN DESCRIPTION"
+  Object newvam = null
+  
+  if (isFirstAddition)
+  {
+print "GONNA ADD A NEW SECTION AT TOP LEVEL\n"
+    Date thedate = today
+    string sthedate = stringOf(thedate)
+    vamlast = create after vlasttoplevel
+    vamlast."Object Heading" = // -
+        "New Activities inserted from vcrm script on " sthedate
+    isFirstAddition = false
+  }
+
+  // find last object top-level object in vam...
+  if (isOutline (vamlast)) newvam = create below vamlast
+  else                     newvam = create after vamlast
+  if (null newvam)  ackAndHalt ("Couldn't creat new vam entry, bye")
+
+  int newabsno = newvam."Absolute Number"
+print "created newvam number " newabsno "\n"
+  newvam."Object Text" = ost
+  newvam."VA Description" = ovd
+  newvam."VA Milestone" = milestone
+  newvam."VA Method" = method
+  // Now the link
+  noError
+  oreq <- newvam
+  string lasterr = lastError  // resets noError while it's at it
+  if (lasterr != "") 
+  {
+    string msg = "ERROR while linking: " lasterr " new vam ID " newabsno // -
+                " -> target ID " oreqabsno " target TMT ID " tmtid "\n"
+    ackAndHalt (msg)
+  }
+  vamlast = newvam   // for next time through
+
+  release dialog
+
+} /* runAdd */ 
+
+// runDel: find the source VAM object and the link from it.  Look at the 
+//      source VAM object and see if it has other outgoing links.  If yes, then 
+//      just delete the link.  If no, then delete the link and the src VAM 
+//      object.  Then update the fields.  Do we want to have a confirm dialog?
+
+void runDel (DBE calledFrom) {
+    string milestone
+    bool OK = find (milestoneOfButton, calledFrom, milestone)
+    if (! OK) ackAndHalt ("UH OH COULDN'T FIND A MILESTONE FOR DEL BUTTON!")
+    print "HI DEL milestone = " milestone "\n"
+    Object ovam
+    Link inlink
+    if (!find (srcVAMOfMilestone, milestone, ovam)) // -
+        ackAndHalt ("Uh OH, couldn't find source VAM object - internal error")
+    if (!find (linkOfMilestone, milestone, inlink)) // -
+        ackAndHalt ("Uh Oh, couldn't find link from VAM src to this obj - internal error")
+        
+    // count outlinks from ovam.  We assume all of them are VAM->Req links, and
+    // we assume our inlink is one of them.  So just count.
+    int numlinks = 0
+    Link outlink
+    for outlink in ovam -> "*" do
+    {
+      numlinks++
+    }
+// ack "ABOUT TO DELETE THE inlink, numlinks = " numlinks ""
+    delete inlink   // WOW - we're actually doing something!
+    if (numlinks == 1)  // that's this one, now gone
+    {
+// ack "ABOUT TO DELETE ovam"
+      softDelete ovam
+    // is soft delete sufficient? 
+    }
+    flushDeletions()
+    release dialog
+    
+
+} /* runDel */ 
+
+void runMove (DBE calledFrom) {
+    string milestone
+    bool OK = find (milestoneOfButton, calledFrom, milestone)
+    if (! OK) ackAndHalt ("UH OH COULDN'T FIND A MILESTONE FOR MOVE BUTTON!")
+    if (!find (dropDownOfMilestone, milestone, moveTargetDropDown)) // -
+        ackAndHalt ("Couln't find moveTargetDropDown, internal error, bye")
+    string newmilestone = get moveTargetDropDown 
+    Object ovam
+    if (!find (srcVAMOfMilestone, milestone, ovam)) // -
+        ackAndHalt ("Uh OH, couldn't find source VAM object - internal error")
+    // Now we just have to modify the method. 
+    ovam."VA Milestone" = newmilestone
+    
+    release dialog
+
+} /* runMove */ 
+
+void gotoPrevCB(DB db)
+{
+  // don't need db, do we...
+// print "gotoPrevCB - current requirement is " oreq."Absolute Number" "\n"
+  Object preq = findPrevReqt (oreq)
+  if (null preq)
+  {
+    ack "No previous requirement found"
+  }
+  else
+  {
+// print "gotoPrevCB - found prev requirement " preq."Absolute Number" "\n"
+    oreq = preq ;
+    release dialog
+  }
+}  /* gotoPrevCB */
+
+void gotoNextCB(DB db)
+{
+  // don't need db, do we...
+// print "gotoNextCB - current requirement is " oreq."Absolute Number" "\n"
+  Object nreq = findNextReqt (oreq)
+  if (null nreq)
+  {
+    ack "No next requirement found"
+  }
+  else
+  {
+// print "gotoNextCB - found next requirement " nreq."Absolute Number" "\n"
+    oreq = nreq ;
+    release dialog
+  }
+}  /* gotoNextCB */
+
+// apply: check to see if any unsaved changes in VAM.  
+//   If yes, save the VAM and leave it open 
+//   If no, warn user snarkily and ignore this call.
+void applyCB (DB db)
+{
+  if (unsaved (vam))
+  {
+    save (vam)
+  }
+  else
+  {
+    ack "There's nothing to save..."
+  }
+}  /* applyCB */
+
+// just close without saving
+void cancelCB (DB db)
+{
+  close (vam, false)
+  // NOW re-open.  Remember this is just cancel - doesn't mean shut down, and
+  // we need the VAM open
+  vam = edit (vamname, true)
+  if (null vam) ackAndHalt ("Couldn't re-open module '" vamname "' for editing\n")
+
+  // dialog DB probably eclipsed...
+  raise db
+
+}  /* cancelCB */
+// Callback for close button to quit entirely
+void setDone (DB box)
+{
+  print "setDone called\n"
+  
+  g_done = true
+  // print "g_done now = " g_done "\n"
+  release box
+}  /* setDone */
+
+
+// str_replace: replace sub-string within string.
+//   copied from here: https://www.ibm.com/developerworks/community/forums/html/topic?id=77777777-0000-0000-0000-000014891187
+
+string str_replace (string sSource, string sSearch, string sReplace) {
+    int iLen = length sSource
+    if (iLen == 0) return ""
+    
+    int iLenSearch = length(sSearch)
+    
+    if (iLenSearch == 0) { 
+        //raiseError ("Parameter error", "in strings.inc/replace: search string must not be empty")
+        return "" 
+    }
+    
+    // read the first char for latter comparison -> speed optimization
+    char firstChar = sSearch[0]
+    
+    Buffer s = create() 
+    int pos = 0, d1,d2;    
+    int i
+    
+    while (pos < iLen) { 
+        char ch = sSource[pos]; 
+        bool found = true
+        
+        if (ch != firstChar) {pos ++; s+= ch; continue}
+        for (i = 1; i < iLenSearch; i++) {
+           if (sSource[pos+i] != sSearch[i]) { found = false; break }
+        }
+        if (!found) {pos++; s+= ch; continue}
+        s += sReplace
+        pos += iLenSearch
+    }
+    
+    string result = stringOf s
+    delete s
+    return result
+}
+
+
+
+///////////////////////////////////////
+// BEGINNING OF MAIN except Globals  //
+///////////////////////////////////////
+Module m = current 
+if (null m) ackAndHalt ("No Module selected")
+
+// FGD 02/26/2016: updated because the DOORS organization has changes. The VAM module
+// is now in the same folder, but has DRD replace by VAM. This affects both vamnamesimple and vamname.
+// So I fixed both of these in the next chunk of code.
+
+string modname = name (m)
+string fullname = fullName (m)
+string pathname = path (m)
+print "name is '" modname "' and fullname is '" fullname "' and path is '" pathname "'\n"
+
+// string vamnamesimple = modname " VAM"
+string vamnamesimple = str_replace( modname, "DRD", "VAM" )
+if (pathname[0:7] == "/Sandbox")
+{
+  vamname = fullname " VAM"
+}
+else
+{
+  // vamname = pathname "/Level 2 VAMs/" modname " VAM"
+  vamname = str_replace( fullname, "DRD", "VAM" )
+}
+print "Will open '" vamname "'\n"
+
+vamref = module (vamname)
+if (null vamref) ackAndHalt ("Couldn't get ModName_ for '" vamname "'")
+if (!exists(vamref)) ackAndHalt ("module '" vamname "' doesn't appear to exist")
+
+vam = edit (vamname, true)
+if (null vam) ackAndHalt ("Couldn't open module '" vamname "' for editing\n")
+if (unsaved vam) ackAndHalt ("VAM IS ALREADY OPEN and needs saving.\n" // -
+                             "Do that first please.\n" // -
+                             "Or at least close it.")
+
+// need to find the last top level VAM object in case we want to add a VA
+Object o
+for o in entire vam do
+{
+  if (isDeleted(o)) continue
+  if (!isOutline(o)) continue
+  int level = level (o)
+  if (level == 1) vlasttoplevel = o
+}
+if (null vlasttoplevel) ackAndHalt ("Couldn't find last top level object: WTF?")
+// OK, have the right place 
+
+// Get the VA Milestone attribute.  
+AttrDef milestoneAD = find(vam, "VA Milestone")
+if (null milestoneAD ) // -
+    ackAndHalt "VAM module doesn't have 'VA Milestone' attribute"
+string milestoneATname = milestoneAD.typeName
+print "milestoneATname = " milestoneATname "\n"
+AttrType milestoneAT = find(vam, milestoneATname)
+if (null milestoneAT) ackAndHalt "Something wrong with milestone attr typedef"
+numMilestones = milestoneAT.size
+// is declared above with a big number: milestones[numMilestones]
+int ic
+print "Possible milestones are: "
+for (ic = 0 ; ic < numMilestones ; ic++) 
+{ 
+  milestones[ic] = milestoneAT.strings[ic]
+  print "    " milestones[ic]
+}
+print "\n"
+
+// Get the VA Method attribute.  
+AttrDef methodAD = find(vam, "VA Method")
+if (null methodAD ) // -
+    ackAndHalt "VAM module doesn't have 'VA Method' attribute"
+string methodATname = methodAD.typeName
+print "methodATname = " methodATname "\n"
+AttrType methodAT = find(vam, methodATname)
+if (null methodAT) ackAndHalt "Something wrong with method attr typedef"
+numMethods = methodAT.size + 1
+// is declared above with a big number: methods[numMethods]
+print "Possible methods are: "
+methods[0] = ""    // we'll see if this is OK...
+for (ic = 1 ; ic < numMethods ; ic++) 
+{ 
+  methods[ic] = methodAT.strings[ic-1]    // remember we have an extra at 0
+  print "    " methods[ic]
+}
+print "\n"
+
+// INITIAL find of requirement.  If no current selection, find the first
+oreq = current m
+if (null oreq)
+{
+  ack ("No Object currently selected\n" "Finding first requirement")
+  Object mtop = first m
+  oreq = findNextReqt(mtop)
+}
+
+ 
+// This is the start of the part that should loop with each change.  Everything
+// above should be constant
+g_done = false
+
+while (!g_done)
+{
+  // (Re) initialize skip lists
+print "BEGINNING OF MAIN LOOP\n"
+  milestoneOfButton = create()
+  dropDownOfMilestone = createString()
+  methodDropDownOfMilestone = createString()
+  methodOfMilestone = createString()
+  srcVAMOfMilestone = createString()
+  linkOfMilestone = createString()
+
+  // Is current requirement a good one?  If not get the next one
+  tmtid = oreq."TMT ID"
+  print "tmt id = " tmtid "\n"
+  if (tmtid == "") 
+  {
+    ack ("TMT ID attribute not defined or empty,\nfinding next good one")
+    Object nreq = findNextReqt(oreq)
+    if (null nreq) ackAndHalt ("No more real requirements, and current isn't either, bye")
+    oreq = nreq
+  }
+  tmtid = oreq."TMT ID"
+  oreqabsno = oreq."Absolute Number"
+  string oreqtext = oreq."Object Text"
+  oreqtext = "[TMTID " tmtid "] " oreqtext
+
+  Link inlink
+print "BEFORE the inlink loop\n"
+  for inlink in oreq <- "*" do
+  {
+    print "Looking at a link ...\n"
+
+    // Skip this link if it's not to the proper VAM
+    string sourcemod = source inlink    
+    if (sourcemod != vamnamesimple) continue
+
+    // get absolute location of linked module
+    Object ovam = source inlink
+
+    // validate handle
+    if (ovam != null)
+    {
+      int absnovam = ovam."Absolute Number"
+print "absnovam = " absnovam "\n"
+      string milestone = ovam."VA Milestone"
+      string method    = ovam."VA Method"
+      print "  vam id " absnovam " milestone: " milestone // -
+          " method: " method "\n"
+      put (methodOfMilestone, milestone, method)
+      put (srcVAMOfMilestone, milestone, ovam)
+      put (linkOfMilestone, milestone, inlink)
+
+    }
+    else
+    {
+      ackAndHalt ("Uh Oh found a null src object, bye")
+    }
+
+
+
+  }
+
+  //////////////////////////////////////////////
+  // Create the dialog box and its buttons.   //
+  //////////////////////////////////////////////
+  dialog = create ( "Milestones for Verification of " tmtid, styleCentered)
+
+  DBE objtextdisplay = text (dialog, "Object Text", oreqtext, 50, true)
+
+  for (ic = 0 ; ic < numMilestones ; ic++) 
+  { 
+    string milestone = milestones[ic]
+    string method = ""
+    bool milestonehasmethod = find (methodOfMilestone, milestone, method)
+
+    field (dialog, "Milestone", milestone, 5, true)
+    beside (dialog)
+
+    // field (dialog, "Method", method, 15, true)
+    int imethod
+    for (imethod = 0 ; imethod < numMethods ; imethod++)
+    {
+      if (method == methods[imethod]) break ;
+    }
+  print "FOUND imethod = " imethod " for method == " method "\n"
+    methodDropDown = choice (dialog, "Method:", methods, numMethods, // -
+                             imethod, 9, false)
+    if (method != "") inactive methodDropDown
+    put (methodDropDownOfMilestone, milestone, methodDropDown)
+  
+  
+    // the Add button is inactive if something's already defined for this method
+    DBE addButton = button (dialog, "Add", runAdd)
+    if (method != "") inactive addButton
+    put (milestoneOfButton, addButton, milestone)
+
+    // The delete button is inactive if there's nothing for this method
+    DBE delButton = button (dialog, "Del", runDel)
+    if (method == "") inactive delButton
+    put (milestoneOfButton, delButton, milestone)
+
+    moveTargetDropDown = choice (dialog, "Move to Milestone", milestones, //-
+                                 numMilestones, 0, 9, false)
+    if (method == "") inactive moveTargetDropDown
+    put (dropDownOfMilestone, milestone, moveTargetDropDown) 
+    DBE moveButton = button (dialog, "Move", runMove)
+    if (method == "") inactive moveButton
+    put (milestoneOfButton, moveButton, milestone)
+
+
+    leftAligned (dialog)
+    if (ic < numMilestones-1) separator dialog
+
+  }
+  
+  DBE prevButton = apply (dialog, "PREV", gotoPrevCB)
+  DBE nextButton = apply (dialog, "NEXT", gotoNextCB)
+  DBE applyButton = apply (dialog, "APPLY", applyCB)
+  DBE cancelButton = apply (dialog, "CANCEL", cancelCB)
+
+  // setCenteredSize (dialog, 1200, 100)
+  close (dialog, true, setDone)
+  realize dialog
+  block dialog
+
+  // get rid of stuff for next go-round
+
+  delete milestoneOfButton 
+  delete dropDownOfMilestone 
+  delete methodDropDownOfMilestone 
+  delete methodOfMilestone 
+  delete srcVAMOfMilestone
+  delete linkOfMilestone
+  milestoneOfButton = null
+  dropDownOfMilestone = null
+  methodDropDownOfMilestone = null
+  methodOfMilestone = null
+  srcVAMOfMilestone = null
+  linkOfMilestone = null
+
+  destroy dialog
+  dialog = null
+  
+/* 
+ack ("again? g_done = " g_done "")
+print "at end of loop, g_done = " g_done "\n"
+*/
+}
+

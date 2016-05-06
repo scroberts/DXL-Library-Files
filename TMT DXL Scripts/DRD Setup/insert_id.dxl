@@ -1,0 +1,130 @@
+// Insert TMT ID Into Object Text
+/* 
+
+Insert TMT ID into the beginning of the Object Text field - for TMT
+December 2015
+
+Description: 	This DXL script performs the following actions:
+		1) copy the TMT ID into the beginning of the Object Text attribute 
+		2) bracket that TMT ID with square brackets
+		3) make the TMT ID and brackets bold
+		4) skip objects where the TMT ID field has any strikethrough font
+		5) optionally (based on variable constant setting) place the TMT ID into the CR Text field
+			- only if that object has a non-blank CR Text field
+
+Assumptions:	The script requires the following conditions for proper function:
+		1) The user has opened the desired module in exclusive edit mode.
+		2) The TMT ID attribute is properly populated.
+		   This script does not check the contents for a valid TMT ID syntax.
+		3) The script does not check if the TMT ID is already in the Obj Text.
+	
+Directions:	1) Open the desired DRD module in exclusive edit mode
+		2) In that module window, select menu item: Tools / Edit DXL...
+		3) Paste this script code into the dialog window and click "Run"
+
+Notes:		1) The script does not save the module, the user should review the changes and 
+		   save the module if satisfied.
+
+*/
+
+
+// Tell script where to place output: Object Text = "OBJ" or CR Text = "CR"
+
+string OBJtext_OR_CRtext = "OBJ"
+
+
+Module m = current
+if (null m)					// Test if any module is open
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)				// Test if current module is open exclusive edit
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+Object o 
+
+Buffer oldText = create()			// Use buffers to retain any OLEs in the attribute
+Buffer newText = create()
+
+string TMT_ID
+string CR_Text
+bool StrikethroughFound
+int count = 0
+int count_skipped = 0
+
+RichText rt
+
+for o in m do {					// Step through the objects in this module
+
+   newText = ""
+   TMT_ID = o."TMT ID"
+
+   if (TMT_ID != "")				// check if the TMT ID field for this object is not empty
+   {
+
+//debug        print "TMT ID:" TMT_ID " \n"		// debug line here
+
+      count++
+
+
+
+// Check if the TMT ID contains any strikethrough text
+
+      string s = richText o."TMT ID"
+      StrikethroughFound = false
+      for rt in s do {
+         if ( rt.strikethru ) { StrikethroughFound = true }
+      }
+      if ( StrikethroughFound ) 
+      {
+         count_skipped++
+         continue     			// skip this object; do not merge the TMT ID into the Object/CR Text
+      }
+
+
+      CR_Text = o."CR Text"		// temp line for OPSRD
+
+
+      if (OBJtext_OR_CRtext == "OBJ") 
+      { 
+         if (CR_Text != "") { continue }	// temp line for OPSRD: skip this obj if it has any CR Text
+
+         oldText = richTextWithOle o."Object Text"	// grab the obj text - with any OLEs
+         newText = "{\\b [" TMT_ID "]}  "		// start with the bolded, bracketed TMT ID
+         newText += oldText				// tack on the existing obj text
+         o."Object Text" = richText tempStringOf newText
+
+      } else
+      {
+         if (OBJtext_OR_CRtext == "CR")
+         {
+            CR_Text = o."CR Text"
+            if (CR_Text != "")			// do the same, but to the CR Text field
+            {
+               oldText = richTextWithOle o."CR Text"
+               newText = "{\\b [" TMT_ID "]}  "	
+               newText += oldText
+               o."CR Text" = richText tempStringOf newText
+
+            }
+         }
+      }
+
+   }
+
+}						// end of loop over objects in the module
+
+
+delete oldText					// delete buffers because DXL is bad at garbage collection
+delete newText
+
+refresh(m)					// refresh the module to display the bold text
+
+print count " TMT IDs found. \n"
+print count_skipped " TMT IDs were skipped due to strikethrough. \n"
+print "Finished. \n"

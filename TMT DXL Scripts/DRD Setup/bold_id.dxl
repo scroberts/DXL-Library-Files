@@ -1,0 +1,95 @@
+// Make TMT ID bold in Object Text field - for TMT
+/* 
+Make TMT ID bold in Object Text field - for TMT
+October 2015
+
+Description: 	This is a DXL script for use in bolding the TMT ID in the Object Text attribute 
+		of requirements in DRD modules.
+
+Assumptions:	The script requires the following conditions for proper function:
+		1) The user has opened the desired module in exclusive edit mode.
+		2) The TMT ID is the first thing in the object text
+		   If there is even 1 space before it, then it will not be bolded
+		3) Warning: TMT IDs are matched with a simple pattern: "[REQ-"
+		4) TMT IDs have 16 characters: "[REQ-#-ABC-####]"
+		5) The script will not bold IDs that do not appear at the beginning of the Object Text.
+		   Any IDs that are prefixed with a space will be ignored and not reported to the user.
+		   Find and manually bold these using a filter on Object Text containing " [REQ".
+
+		
+Directions:	1) Open the desired DRD module in exclusive edit mode
+		2) In that module window, select menu item: Tools / Edit DXL...
+		3) Paste this script code into the dialog window and click "Run"
+		4) Manually bold any IDs that were reported by the script as skipped.
+
+Notes:		1) The script does not save the module, the user should review the changes and 
+		   save the module if satisfied.
+		2) The script checks the RTF version of the Object Text for the "[REQ-" string because
+		   a few objects may have some odd kerning command characters inserted after the "["
+		   and that causes problems.  For those, the Object ID is printed so the user can
+		   easily find them and bold those IDs manually.
+
+*/
+
+
+Module m = current
+if (null m)					// Test if any module is open
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)				// Test if current module is open exclusive edit
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+Object o 
+
+Buffer oldText = create()			// Use buffers to retain any OLEs in the attribute
+Buffer newText = create()
+
+string TMT_ID
+string obj_text_string
+int offset
+
+
+for o in m do {					// Step through the objects in this module
+
+   newText = ""
+   obj_text_string = o."Object Text"
+
+   if (obj_text_string[0:4] == "[REQ-")		// check if this obj text begins with a TMT ID
+   {
+
+      TMT_ID = obj_text_string[0:15]
+
+      oldText = richTextWithOle o."Object Text"
+
+      offset = contains(oldText, "[REQ-", 0)	// find offset of the TMT ID
+
+      if (offset == -1) 			// "[REQ-" was not found in the RTF version
+      {						// report this & do nothing with this object
+         print "[REQ- not found in RTF: " identifier o " ... skipping this object. \n"
+         print "oldText:" tempStringOf oldText " \n"
+	
+      } else					// found "[REQ-" in the RTF version
+      {
+         newText = oldText[0:offset-1]		// construct new text, starting with RTF preamble
+         newText += "{\\b " TMT_ID "}"		// then add the bold TMT ID
+         newText += oldText[offset+16:]		// then append the rest of the original text
+
+         o."Object Text" = richText tempStringOf newText
+      }
+
+   }
+
+}	// end of loop over objects in the module
+
+delete oldText
+delete newText
+
+refresh(m)					// refresh the module to display the bold text
+
+print "Finished. \n"

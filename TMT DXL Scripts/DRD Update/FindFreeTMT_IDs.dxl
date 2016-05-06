@@ -1,0 +1,219 @@
+// Find Free TMT IDs
+/* 
+ Find Free TMT IDs - for TMT
+
+ Version: FindFreeTMT_IDs v1.dxl
+
+ Description: 	The purpose of this script is to give the user a list of available (unused) TMT IDs.
+		The script is run when the user creates a new TMT ID and doesn't want to reuse an old ID.
+		 
+ Process:	The script performs these steps:
+		1) Confirms that a module is open and it contains an attribute named "TMT ID".
+		2) Prompts the user for a range of IDs
+			- the script will look for unused IDs within the specified range (including range endpoints)
+			- the range given by the user must be positive
+				e.g., if the user gives ID1 and ID2, then ID2 must be > ID1
+		3) Examines all objects in the module looking for all IDs within the specified range.
+		4) Presents the user a list of unused IDs within the given range.
+			- if none are available, then the user is told this
+			- the IDs are displayed in the standard DXL dialog output window
+
+ Assumptions:	1) the TMT ID attribute is populated with string with this syntax:
+			REQ-#-ABC-####
+		2) the ID number is extracted as the last 4 characters in the string 
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+
+
+*/
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+if (!exists attribute "TMT ID")
+{
+   ack "TMT ID attribute not found in this module.  Aborting."
+   halt
+}
+print "Module: " m."Name" "\n"
+
+
+
+//=======================================================================================================
+// Variable declarations
+
+Object o 
+string TMTid = ""
+int id1 = 0		// user given starting value in integer format
+int id2 = 0		// user given ending value in integer format
+int i
+int numIDs
+string id1s = ""	// user given starting value in string format
+string id2s = ""	// user given ending value in string format
+int len
+string thisID
+int count
+bool IDused[9999]	// allocate a big array (it's stupid, but it works)
+
+
+//=======================================================================================================
+// Ask the user for range of IDs.
+
+
+// Create the dialog box
+
+DB getInfo = create "Get TMT ID Range"
+label(getInfo, "Please provide the range to search...")
+DBE range1 = field(getInfo, " Begin: ", "", 4)
+DBE range2 = field(getInfo, " End: ", "", 4)
+void getrange(DB getInfo) {
+   id1s = get range1
+   id2s = get range2
+   release getInfo			// remove the dialog  (or should I use "hide")
+}
+close(getInfo, false, getrange)		// omit the "Close" button
+apply(getInfo, "Submit", getrange)	// add a "Submit" button
+
+
+// Display the dialog - in "modal" style (forcing it to be addressed by the user)
+
+block getInfo
+
+
+// Make sure user gave numbers and not extra characters
+
+if (!isValidInt(id1s))
+{
+   ack "Starting ID is not a valid integer!  Aborting."
+   halt
+}
+if (!isValidInt(id2s))
+{
+   ack "Ending ID is not a valid integer!  Aborting."
+   halt
+}
+
+
+// Add any needed leading "0"s to the given IDs (there's probably an easier way to do this)
+
+if (length(id1s) < 4)
+{
+   id1s = "0" id1s
+   if (length(id1s) < 4)
+   {
+      id1s = "0" id1s
+      if (length(id1s) < 4)
+      {
+         id1s = "0" id1s
+      }
+   }
+}
+if (length(id2s) < 4)
+{
+   id2s = "0" id2s
+   if (length(id2s) < 4)
+   {
+      id2s = "0" id2s
+      if (length(id2s) < 4)
+      {
+         id2s = "0" id2s
+      }
+   }
+}
+
+
+// Make sure the user gave a valid range
+//    This is done after adding any needed leading "0"s because I'm using string comparison "<"
+
+if (id2s < id1s)
+{
+   ack "Starting ID is larger than ending ID.  Aborting."
+   halt
+}
+
+print "ID1 = " id1s " \n"
+print "ID2 = " id2s " \n"
+
+
+//=======================================================================================================
+// Use the array IDused to track ID usage within the given range.
+
+id1 = intOf(id1s)
+id2 = intOf(id2s)
+numIDs = id2 - id1 + 1
+for (i=id1; i<=id2; i++) {
+   IDused[i] = false		// initialize array to False = ID not used
+}
+
+
+//=======================================================================================================
+// Step through the objects in this module.
+// Search for IDs that are within the given range.
+// Might need to left-pad the given IDs with leading "0"s if they're missing, this is because
+// I am using a string comparison ">= and <=" and the strings must be similarly formatted.
+
+print "Looping over objects...  \n"
+for o in entire(m) do {				// entire() will include deleted objects
+
+   TMTid = o."TMT ID"
+
+   if (TMTid != "")
+   {
+      len = length(TMTid)
+      thisID = TMTid[len-4:len]			// the last 4 characters assumed to hold the ID number
+      if (length(thisID) < 4)			// add any needed front-pad of "0"s
+      {						//   there's probably an easier way to do this
+         thisID = "0" thisID
+         if (length(thisID) < 4)
+         {
+            thisID = "0" thisID
+            if (length(thisID) < 4)
+            {
+               thisID = "0" thisID
+            }
+         }
+      }
+
+      if (thisID >= id1s && thisID <= id2s)	// is this ID within the user's given range
+      {
+//         print "thisID is in range:" thisID " \n"	// debug print
+         i = intOf(thisID)
+         IDused[i] = true			// note that this ID is already used
+      }
+   }
+}		// end loop over objects
+
+
+//=======================================================================================================
+// Finally, review the array of IDs and report those that are currently unused.
+
+print "These IDs are unused within that range: \n"
+count = 0
+for (i=id1; i<=id2; i++) {
+   if (!IDused[i]) {				// if this ID is not used, then tell the user
+      print i "\n"
+      count++
+   }
+}
+print "There are " count " unused IDs in that range. \n"
+
+
+//=======================================================================================================
+// Clear memory (becuase DXL is not good at memory management)
+
+// delete(IDused)
+// destroy(getInfo)
+
+
+//=======================================================================================================
+// Print final output summary
+
+
+print "Finished \n"

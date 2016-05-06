@@ -1,0 +1,21 @@
+// Clear All Suspect Links in All DRDs
+/* 
+ Clear All Suspect Links in All DRDs - for TMT
+ 
+ Version:	Clear All Suspect Links in All DRDs v0.dxl
+
+
+
+*/
+
+
+
+
+
+
+//=======================================================================================================
+// Print final output summary
+
+
+print "This is a dummy script.  It DOES NOTHING! \n"
+print "Finished \n"

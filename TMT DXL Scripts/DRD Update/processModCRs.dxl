@@ -1,0 +1,401 @@
+/*
+processModCRs - Process a CR on a given DRD module.
+
+Description:	The purpose of this script is to implement a specified CR on the open DRD module.
+		Specifically, this script copies the contents of the "CR Text" attribute into the
+		"Object Text" attribute, for the specified CR where the "CR State" is set to "Accepted".
+
+Process:	The script performs these steps:
+		1) Scans the open module and IDs all CRs that are found.
+		2) Prompts the user for a CR ID to process.  Then it checks if that CR is ready to be
+			processed (e.g., has at least one entry with "CR State" set to "Accepted").
+		3) The script only edits objects that have the specified CR ID and "CR State" is "Accepted".
+		4) The current "Object Text" is replaced with the contents of the "CR Text" field.
+		5) The "CR Text" attribute is cleared.
+		6) The "CR ID" attribute is cleared.
+		7) The "CR History" attribute is updated; appending this CR and the date.
+		8) The "CR State" attribute is reset to the default value.
+
+Dependencies:	This file draws upon the include file named CRutils.dxl and CRutils includes CRgenutils.dxl.
+
+Assumptions:	The script requires the following conditions for proper function:
+		1) Two additional DXL script files are read by #include statements (CRUtils.dxl and CRgenutils.dxl)
+			and those files must be located in the same directory as this script.
+		2) The CR ID entered by the user must match the ID as included in the module.
+			For example, if the module uses "CR097" then the user must enter "097" with the "0" prefix.
+
+Before Use:	Before running the script, perform these steps:
+		1) Set the value of the attribute "CR State" to Accepted for all CR changes to be implemented.
+		2) Scan the "CR Text" field confirming that it is properly populated.  
+
+Directions:	1) Open the DRD module where you want to process a CR.
+		2) In that module window, select menu item: Tools / Edit DXL...
+		3) Click the "Load..." button and browse to this DXL script file.
+		4) Click "Run"
+		5) The DXL will prompt you for information and confirmations as described in Section 4.7.3 of
+			"TMT Requirements Management Procedure Document" (TMT.SEN.TEC.13.040)
+		6) See the above mentioned document for detailed instructions for using this script.
+
+*/
+
+#include "CRutils.dxl"
+
+pragma runLim, 0	// suppress DXL execution timeout
+
+bool ISTEST = false
+
+/* DB exBox = create "Use of Get"
+DBE intIn = slider(exBox, "Integer:", 50, 0, 100)
+DBE stringIn = field(exBox, "String:", "Example", 20)
+void doGet(DB exBox) 
+{
+  int i = get intIn
+  string s = get stringIn
+   print i ", " s "\n"
+} // doGet
+//apply(exBox, "Get", doGet)
+//show exBox 
+*/
+
+Date dtoday = today()
+string stoday = dtoday ""
+
+Regexp CRID_RE = regexp "^CR[0-9]+$"
+
+// define global variables
+string listofgoodmodules = "List of modules having all CR attributes: "
+string listofbadmodules  = "list of modules NOT having all CR attributes: "
+
+// Define subroutine doModule
+//	This routine loops over the objects of the given module and collects CR-related data.
+//	The CR data is stored in DXL skip lists for subsequent review and processing.
+//	A subroutine named addRecord actually does the data parsing and populates the skip lists.
+string doModule (Module mod)
+{
+  ModName_ modname
+  string smname
+  string returnval = ""
+
+  if (null mod) 
+  { 
+    print "\n *** Got null module for *** \n" ; 
+    return ""
+  }
+
+  smname = fullName(mod)
+
+  bool CR_ID = false
+  bool CR_Text = false
+  bool CR_State = false
+  bool CR_History = false
+  string sattrname
+  for sattrname in mod do	// check if required attributes are in this module
+  {   
+    AttrDef ad = find (mod, sattrname)
+    if (null ad)
+    {
+      print "OOPS - attrdef for " sattrname" is null!\n"
+      continue
+    }
+    // if (!ad.system)
+    if (sattrname == "CR ID") CR_ID = true
+    if (sattrname == "CR Text") CR_Text = true
+    if (sattrname == "CR State") CR_State = true
+    if (sattrname == "CR History") CR_History = true
+  }
+
+  bool hasemall = CR_ID && CR_Text // -
+                        && CR_State && CR_History
+  if (hasemall) listofgoodmodules = listofgoodmodules "\n\t" smname
+  else          listofbadmodules  = listofbadmodules   "\n\t" smname
+
+  if (! hasemall) return "'"smname "' does not have requisite attributes"
+  Object o
+  for o in entire mod do
+  {
+    if (isDeleted(o)) continue
+
+    // We also need to skip table headers and table rows.  These are 
+    // invisible table parts, some of which have somehow  gotten partially 
+    // initialized as part of a CR.  The CR then fails because they 
+    // aren't complete.  However they can't be edited, so no go.
+    if (table(o)) continue
+    if (row(o)) continue
+
+    int absno = o."Absolute Number"
+    bool rstat = addRecord (smname, o)		// process this object, saving info in skip lists
+						// addRecord is a subroutine in CRUtils.dxl file
+    if (!rstat) print "UH OH addRecord had a problem with " // -
+         smname "/" absno "\n"
+    
+  }
+  return ""
+} 
+
+Project p
+string projname				// note: this variable is never used elsewhere
+Regexp folderRE
+
+print "Module Name\tCR ID\tCR Text\tCR State\tCR History\tHAS THEM ALL\n"
+
+// initialize the dxl skip lists CRrecords and CRstatus
+bool isOK = initRecords()
+if (!isOK)
+{
+  print "Failed to initialize skip lists. Aborting.\n" 
+  halt
+}
+
+Module mod = current
+if (null mod) 
+{
+  ack "No module open"
+  halt
+}
+string smname = fullName (mod)		// get the module name (string)
+print smname "\n"
+
+
+ModName_ modname
+modname = module (smname)
+string returnval = doModule(mod)	// run subroutine doModule on this module
+print "AFTER doModule\n"
+
+print listofgoodmodules "\n"
+print "CRs in following will be NOT BE PROCESSED\n" 
+print listofbadmodules "\n"
+
+
+// At this point all modules should be closed, and the CR information 
+// is in the CRutils skip lists.
+
+int ncrids = getNumberOfCRIDs()
+print "We have " ncrids " CRIDs\n"
+print "Module\tID\tCRID\tCR State\tProcess Status\n"
+string crid
+string tdisplay = ""    // for later text display
+for crid in CRrecords do
+{
+  crid = (string key CRrecords)
+  bool isok = setCurrentCRID (crid)
+  if (!isok)
+  {
+    print "Couldn't set current CRID to '" crid "'\n"
+    continue
+  }
+  int nrecords = getNumberOfRecords()
+  string cridstatus = getCurrentCRIDstatus()
+  print "\t\t" crid "\thas " nrecords " records, status " cridstatus "\n"
+
+  int i
+  for (i = 0 ; i < nrecords ; i++)
+  {
+    string record = getNextRecord()
+    print record "\n"
+  }
+}
+
+// Create the dialog box
+
+DB getCRID = create "ENTER CRID"
+DBE objTextElem = text(getCRID, "CRIDs", "xxx", 400, true)
+
+DBE cridStringDBE = field(getCRID, "Enter the number (enter 0 for ADMIN): CR", "", 4)
+string thecrid = ""
+void doCheckCRID(DB getCRID) 
+{
+  string s = get cridStringDBE  
+  string testcrid = "CR" s
+  if (null cistrcmp( testcrid, "CR0") )
+  {
+    testcrid = "ADMIN"
+  }
+  bool cridOK = setCurrentCRID (testcrid)
+  if (!cridOK)
+  {
+    ack "CRID '" testcrid "' not in list"
+    thecrid = ""
+  }
+  else
+  {
+    string cridstatus = getCurrentCRIDstatus()
+    if (cridstatus != "CR_CRID_OK")
+    {
+      ack "CRID '" testcrid "' cannot be processed\n" cridstatus
+      thecrid = ""
+    }
+    else
+    {
+      ack "CRID '" testcrid "' can be processed"
+      thecrid = testcrid
+      release getCRID
+    }
+  }  
+} // doCheckCRID
+
+apply(getCRID, "Check", doCheckCRID)
+tdisplay = ""    // for later text display
+for crid in CRrecords do
+{
+	crid = (string key CRrecords)
+	bool isok = setCurrentCRID (crid)
+	if (!isok)
+	{
+		print "Couldn't set current CRID to '" crid "'\n"
+		continue
+	}
+	int nrecords = getNumberOfRecords()
+	string cridstatus = getCurrentCRIDstatus()
+
+	tdisplay = tdisplay "CRID '" crid "' has " nrecords " records, "
+	if (cridstatus == "CR_CRID_OK") tdisplay = tdisplay "can be processed\n"
+	else    tdisplay = tdisplay "CANNOT BE PROCESSED, select for explanation\n"
+
+	int i
+	for (i = 0 ; i < nrecords ; i++)
+	{
+		string record = getNextRecord()
+		print record "\n"
+		tdisplay = tdisplay "\t" record "\n"
+	}
+}
+set (objTextElem, tdisplay)
+set (cridStringDBE, "")
+
+//show getCRID
+block getCRID		// display the dialog box
+
+// process the response from the user
+
+if (thecrid == "" || thecrid == "CR")
+{
+	ack "No valid CRID entered.  Aborting."
+	halt
+}
+// check again...
+bool isok = setCurrentCRID (thecrid)
+if (!isok)
+{
+	print "Couldn't set current CRID to '" thecrid "'  Aborting. \n"
+	halt
+}
+
+string cridstatus = getCurrentCRIDstatus()
+if (cridstatus == "CR_CRID_OK")
+{
+	bool goahead = confirm ("About to process the CR '" thecrid "' - OK?" )
+	if (!goahead) halt
+}
+else
+{
+	print "Strange condition encountered.  Aborting. \n"
+	halt
+}
+
+
+// Begin processing the CR
+
+print "GONNA DO IT\n"
+int nrecords = getNumberOfRecords()
+int i
+string opensmname = ""
+int changecount = 0
+int rejectcount = 0
+int newcount = 0
+int deletecount = 0
+for (i = 0 ; i < nrecords ; i++)
+{
+	string record = getNextRecord()
+	print record "\n"
+	// we'll access these by their globals.  Yuck.
+	print " CR_smname = " CR_smname "\n"
+	print " CR_absno = " CR_absno "\n"
+	print " CR_State = " CR_State "\n"
+	print " CR_doStatus = " CR_doStatus "\n"
+
+	Object o = object (CR_absno, mod)
+	if (null o) 
+	{
+		ack "Couldn't open object with absno " CR_absno //-
+							" in module '" opensmname "', bye"
+	}
+	
+	// CR SKIP means rejected, so we clear stuff.
+	if (CR_doStatus == "CR_SKIP")
+	{
+/*
+7.	For all objects where CR state = Rejected 
+a.	Clear CR ID, CR text, CR State, and CR Acceptance State
+b.	Should put CR ID date REJECTED appended to history
+*/
+		o."CR ID" = ""
+		o."CR Text" = ""
+		o."CR State" = ""
+		string shistory = o."CR History"
+		if (shistory != "") shistory = shistory "\n"  // add a newline if not empty
+		shistory = shistory thecrid "   " stoday " REJECTED"
+		o."CR HISTORY" = shistory
+		rejectcount++
+
+	}
+	else		// not skipping this object, so process this CR
+	{
+		print "Opened '" opensmname "' object " CR_absno "\n"
+		bool isdeletion = false
+		bool isnew      = false
+		string scrtext = o."CR Text"  		// get the string values for now
+		string sobjtext = o."Object Text"
+               changecount++
+
+// if obj txt blank, then this is a new object
+		if (sobjtext == "") isnew = true	
+
+// if obj txt starts with "Delete", then this is a deletion
+		if (scrtext[0:5] == "Delete") isdeletion = true
+
+		print "isnew = " isnew "\n"
+		print "isdeletion = " isdeletion "\n"
+
+		if (isnew)					// this is a new obj added with this CR
+		{
+			string tmtid = extractTMTID (scrtext)	// get TMT ID from the CR Text
+			if (tmtid == "") tmtid = "MISSING ID"
+		print "setting o.tmtid to be " tmtid "\n"
+			o."TMT ID" = tmtid			// fill in the TMT ID
+			newcount++
+		}
+
+		if (isdeletion)					// this obj is deleted with this CR
+		{
+		print "setting o.paragraph style to \"\"\n"
+			o."Paragraph Style" = ""		// clear the Paragraph Style field
+			deletecount++
+		}
+
+// Now do the usual stuff.  We don't use an intermediate for the object 
+// text to preserve the rich text. 
+// Copy the CR Text contents (including richtext) to the Object Text
+		o."Object Text" = richText(richTextWithOle(o."CR Text"))
+
+// update the CR History field - appending a note for this CR
+		string shistory = o."CR History"
+		if (shistory != "") shistory = shistory "\n"  	// start with a newline if not empty
+		shistory = shistory thecrid "   " stoday	// note = CR ID and today's date
+		o."CR HISTORY" = shistory			// update the field
+
+// d. Clear CR ID, CR Text, CR Acceptance State and CR State fields 
+		o."CR ID" = ""
+		o."CR Text" = ""
+		o."CR State" = ""
+	}
+
+}
+
+ack "Processed CR '" thecrid "' for module '" opensmname "'\n" // -
+    " rejected records: " rejectcount "\n" // -
+    " total changed records: " changecount "\n" // -
+    " new records: " newcount "\n" // -
+    " deleted records: " deletecount "\n" // -
+    " Please decide if you want to save and close the module"
+
+

@@ -1,0 +1,50 @@
+// Populate TMT ID Field
+/* 
+ Populate TMT ID Field
+ Feb 2016
+
+ Description: 	This script copies the TMT ID from the Object Text field to the TMT ID field.
+		It will overwrite the previous contents of the TMT ID field.  
+		Assumes the TMT ID is the first thing in the Object Text field.
+		This script is used after the initial import of a new DRD module.
+*/
+
+
+// Define subroutine to extract the ID from the Object Text
+
+string extractTMTID (string scrtext)
+{
+  if (scrtext[0:0] != "[") return ""
+  int offset
+  int len
+  if (!findPlainText(scrtext, "]", offset, len, true, false)) return ""
+  if (offset < 2) return ""     // trap error condition
+  string tmtid = scrtext[1:offset-1]
+  return tmtid
+}
+
+
+// Main code
+
+Object o 
+string objtxt = ""
+int objCount = 0
+int editCount = 0
+
+for o in current Module do {  				// for each object in the module
+
+   objtxt = o."Object Text"
+   objCount++
+   string tmtid = extractTMTID (objtxt)
+
+   if (tmtid != "") 
+   {
+      o."TMT ID" = tmtid
+      editCount++
+   }
+
+}
+
+print "Number of objects examined: " objCount "\n"
+print "Number of TMT IDs edited: " editCount "\n"
+print "Finished \n"

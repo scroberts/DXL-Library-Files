@@ -1,0 +1,189 @@
+// Add DCC Hyperlinks
+/* 
+ Add DCC Links to Document Register - for TMT
+
+ Version: Add DCC Links to Documents Register v1.dxl
+
+ Description: 	The purpose of this script is to add hyperlink text to fields in the Documents Register.
+		Three attributes are updated:
+			dccDocHistory
+			dccDocHandleHyperlink
+			dccDocVersionHyperlink
+		If the field contains only an integer number, then that field is edited to contain a suitable hyperlink
+		to the given document number in DCC.
+		If the field is not blank but doesn't contain all numerals or a proper hyperlink, then a warning
+		is given in the DXL output window.  Proper hyperlinks begin in the first character (no leading spaces).
+		 
+ Assumptions:	1) the script is run on the Documents Register
+		2) the Documents Register must be open exclusive edit
+		3) the script ONLY modifies the above-listed fields that contain ONLY numerals, no spaces or other chars
+		4) the script does not validate the given number; it assumes the number to be valid
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+
+
+*/
+pragma runLim, 0		// suppress DXL execution timeout
+
+
+//=======================================================================================================
+// Variable declarations
+
+
+string Documents_Module 	= "/TMT Requirements/Documents Register/Documents Register"
+
+Object o
+
+int countDH = 0
+int countDHH = 0
+int countDVH = 0
+int count = 0
+int countWarnings = 0
+bool obj_updated
+
+string dccDocHistory = ""
+string dccDocHandleHyperlink = ""
+string dccDocVersionHyperlink = ""
+int doc_absno
+
+
+
+//=======================================================================================================
+// Check the current module for suitability
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)		// check if the user can edit the current module
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+int attributesExist = 0		// check if current module has the correct attributes
+if ( exists attribute "dccDocHistory" ) { attributesExist++ }
+if ( exists attribute "dccDocHandleHyperlink" ) { attributesExist++ }
+if ( exists attribute "dccDocVersionHyperlink" ) { attributesExist++ }
+if (attributesExist < 3)
+{
+   ack "This module DOES NOT have the required attributes.  Aborting."
+   halt
+}
+
+
+string thisMod = fullName(m)
+if (thisMod != Documents_Module)
+{
+   ack "This module is NOT the Documents Register."
+//debug   halt
+}
+
+
+
+Regexp Number_re = regexp "^[0-9]+$"		// define regular expression for only a string of numbers
+
+
+//=======================================================================================================
+// Loop over docs in the Documents module
+
+for o in m do {			// loop over the objects in the Documents Register
+
+   dccDocHistory 		= o."dccDocHistory"
+   dccDocHandleHyperlink 	= o."dccDocHandleHyperlink"
+   dccDocVersionHyperlink 	= o."dccDocVersionHyperlink"
+   doc_absno 			= o."Absolute Number"
+
+   obj_updated = false
+
+   if (dccDocHistory != "") 
+   {
+      if (Number_re dccDocHistory) 
+      {
+         countDH++
+         obj_updated = true
+         o."dccDocHistory" = "https://docushare.tmt.org/docushare/dsweb/ServicesLib/Document-" dccDocHistory "/History"
+
+      } else {
+         if (dccDocHistory[0:3] != "http")	// cell is not all numbers AND is not proper hyperlink
+         {
+            print "WARNING: Doc " doc_absno " dccDocHistory does not contain all numbers or proper hyperlink.  Skipping. \n"
+            countWarnings++
+         }
+
+      }
+   }
+
+   if (dccDocHandleHyperlink != "") 
+   {
+      if (Number_re dccDocHandleHyperlink) 
+      {
+         countDHH++
+         obj_updated = true
+         o."dccDocHandleHyperlink" = "https://docushare.tmt.org/docushare/dsweb/Get/Document-" dccDocHandleHyperlink
+
+      } else {
+         if (dccDocHandleHyperlink[0:3] != "http")	// cell is not all numbers AND is not proper hyperlink
+         {
+            print "WARNING: Doc " doc_absno " dccDocHandleHyperlink does not contain all numbers or proper hyperlink.  Skipping. \n"
+            countWarnings++
+         }
+
+      }
+   }
+
+
+   if (dccDocVersionHyperlink != "") 
+   {
+      if (Number_re dccDocVersionHyperlink) 
+      {
+         countDVH++
+         obj_updated = true
+         o."dccDocVersionHyperlink" = "https://docushare.tmt.org/docushare/dsweb/Get/Version-" dccDocVersionHyperlink
+
+      } else {
+         if (dccDocVersionHyperlink[0:3] != "http")	// cell is not all numbers AND is not proper hyperlink
+         {
+            print "WARNING: Doc " doc_absno " dccDocVersionHyperlink does not contain all numbers or proper hyperlink.  Skipping.\n"
+            countWarnings++
+         }
+
+      }
+
+   }
+
+
+   if (obj_updated) { count++ }
+
+
+}	// end of loop over objects in the Documents Register
+
+
+
+
+
+
+//=======================================================================================================
+// Clear memory (becuase DXL is not good at memory management)
+
+delete (Number_re)
+
+
+
+//=======================================================================================================
+// Print final output summary
+
+print count " objects were updated. \n"
+print countDH " dccDocHistory fields updated. \n"
+print countDHH " dccDocHandleHyperlink fields updated. \n"
+print countDVH " dccDocVersionHyperlink fields updated. \n"
+print countWarnings " fields were skipped: they contained non-numeric content that wasn't a hyperlink. \n"
+if (countWarnings > 0) {
+   print "   Hyperlinks should begin in the first character (no leading spaces). \n"
+}
+print "Finished \n"

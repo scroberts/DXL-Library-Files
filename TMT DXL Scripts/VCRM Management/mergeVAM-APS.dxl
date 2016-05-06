@@ -1,0 +1,288 @@
+// mergeVAM - APS
+/* Each version has to be tailored for the specific VAM module attributes that are used for that sub-system. The followig two
+lists need to be filled in: mustMatchAttrs and concatAttrs
+
+This version was edited to make it APS specific.
+--- FGD
+
+Version: mergeVAM-APS.dxl
+*/
+
+pragma runLim,0
+
+string mustMatchAttrs[] = {
+  "VA Milestone",
+  "VA Method",
+  "VA Status",
+  "Is Final VA",
+  "VA Approval"
+}
+// FGD: removed "VA Procedure Submission" from the above list
+
+int nMustMatchAttrs = sizeof mustMatchAttrs ;
+string concatAttrs[] = {
+  "Object Text",
+  "VA Procedure",
+  "VA Owner"
+}
+int nConcatAttrs = sizeof concatAttrs ;
+
+// FGD: removed the following from the above list. 
+//  "VA Measuring Instrument"
+//  "VA Closure Report",
+//  "VA Pass/Fail criterion",
+//  "VA Completion Date"
+//  "VA Report"
+
+
+// COMMENTS:
+// We have to throw out entire vam group (set of objects with identical Object 
+// Short Texts) if any of mustMatchAttrs' values don't match.  So it's a two-pass
+// operation: check the mustMatchAttrs, then do the concatAttrs.
+//
+//  The concatAttrs are a bit harder.  We need to keep track of the values of each
+// such attr, for each object in vam group.  So we'll have to have an array of Skip
+// lists.  Outer, containing array is index by attribute name,
+// the value being the Skip list for each attr.  Inner Skip list is keyed by string 
+// which is value of the attribute for each object in vam group.  That way we can
+// ignore a value which has already been found.  To keep order, sort of, we immediately
+// concatenate the value of an element of an array of attr values, where the index of 
+// the array is the same as the index in the concatAttrs array.  At least this 
+// time we know the lenght of the array.  What a pain.
+
+// GLOBALS: yuck, but we need these in callbacks
+
+Skip listOfAttrLists[nConcatAttrs]
+
+void ackAndHalt (string msg)
+{
+  ack msg
+  halt
+}
+
+int findinstrings (string strings[], int nstrings, string thestring)
+{
+  int i 
+  for (i = 0 ; i < nstrings ; i++) {
+// print "i=" i " strings[i]=" strings[i] " thestring=" thestring "\n"
+    if (strings[i] == thestring) return i
+  }
+  return -1 
+}
+
+///////////////////////////////////////
+// BEGINNING OF MAIN except Globals  //
+///////////////////////////////////////
+Module vam = current 
+if (null vam) ackAndHalt ("Must execute script from VAM module")
+string vamname = name (vam)
+string vamfullname = fullName (vam)
+string vampathname = path (vam)
+print "name is '" vamname "' and fullname is '" vamfullname // -
+             "' and path is '" vampathname "'\n"
+
+// do we need this? ModName_ vamref = module (vamname)
+
+// Need to check all the attributes to see if they exist.
+int i
+for (i = 0 ; i < nMustMatchAttrs ; i++)
+{
+  string sattrname = mustMatchAttrs[i] 
+  AttrDef ad = find (vam, sattrname)
+  if (null ad) ackAndHalt ("VAM must have attr '" sattrname "', bye")
+}
+for (i = 0 ; i < nConcatAttrs ; i++)
+{
+  string sattrname = concatAttrs[i]
+  AttrDef ad = find (vam, sattrname)
+  if (null ad) ackAndHalt ("VAM must have attr '" sattrname "', bye")
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+// Now we start looking at each object in turn.  If it's not a header, and has an     //
+// Object Short Text defined, it might qualify.  We'll do this in order, and do only  //
+// one unique Object Short Text at a time.  To be a little faster, we'll want to keep //
+// track of the current top at the outermost part of the loop.                        //
+////////////////////////////////////////////////////////////////////////////////////////
+
+// We need to keep track of whether we've looked at a vam group already.  Otherwise,
+// in case we reject a group because of non-matching attributes, we'll see it again 
+// and possibly process it in error.
+Skip vamGroupProcessed = createString()
+
+string errors = ""
+Object o = null
+for o in entire vam do   // Look at everything, regardless of filter.  Is that what's wanted?
+{
+  if (isDeleted(o)) continue
+  if (isOutline(o)) continue
+  string vamgroup = o."Object Short Text"
+  if (vamgroup == "") continue
+  // Check to see if this was already processed somehow.  Should get here only
+  // in case of previous error.
+  string dummy
+  if (find (vamGroupProcessed, vamgroup, dummy)) continue
+  
+  // begin this vamgroup
+  bool isOK = true     // errors make this false
+  string theseErrors = ""
+  int absno = o."Absolute Number"
+  print "FOUND ONE at " absno " vamgroup (OST) == '" vamgroup "'\n"
+  // REcord it now, whether it gets done or not
+  put (vamGroupProcessed, vamgroup, "Done")   // could put more info later...
+  // OK, we've found a vamgroup.  We'll now go through all the objects from next(obj) to 
+  // bottom. 
+  // First we need to find all the mustMatchAttrs, and record the values
+  string mmattrvals[nMustMatchAttrs]
+  for (i = 0 ; i < nMustMatchAttrs ; i++)
+  {
+    sattrname = mustMatchAttrs[i]
+    mmattrvals[i] = o.sattrname "" // just in case it's not a string...
+print "     found val '" mmattrvals[i] "' for attr '" sattrname "'\n"
+  }
+  Object candidate = next o
+  while (! null candidate)
+  {
+    if (!isDeleted(candidate) and !isOutline(candidate))
+    {
+      string candgroup = candidate."Object Short Text"
+      if (candgroup == vamgroup)    // takes care of blanks as well
+      {
+        int candabsno = candidate."Absolute Number"
+        print "FOUND A MATCH TO absno at " candabsno "\n"
+        // Check the must-match attributes.
+        // We'll check everything, then report all errors before quitting
+        for (i = 0 ; i < nMustMatchAttrs ; i++)
+        {
+          sattrname = mustMatchAttrs[i]
+          string candattr = candidate.sattrname
+          if (mmattrvals[i] != candattr)
+          {
+            isOK = false
+            theseErrors = theseErrors "VAM group '" vamgroup "' not processed, attr '" // -
+                   sattrname "' has non-matching values in obj " candabsno " vs " absno "\n"
+          }
+        }
+      }
+    }
+    candidate = next candidate
+  }
+  if (!isOK)
+  {
+    print "WILL NOT PROCESS vamgroup '" vamgroup "':\n"
+    print theseErrors
+    errors = errors theseErrors "\n===================\n"
+  }
+  else
+  {
+    print "WILL PROCESS vamgroup '" vamgroup "'\n"
+    // OK, now what!?
+    // First prepare the skip lists, and populate with first object's attr values
+    string cattedattrs[nConcatAttrs]
+    for (i = 0 ; i < nConcatAttrs ; i++)
+    {
+      sattrname = concatAttrs[i]
+      string attrval = o.sattrname
+      Skip attrList = createString()
+      listOfAttrLists[i] = attrList
+      cattedattrs[i] = attrval
+      put (attrList, attrval, true)
+    }
+    
+    // NOW we have to find the candidates again.  Sheesh
+		Object candidate = next o
+		while (! null candidate)
+		{
+			if (!isDeleted(candidate) and !isOutline(candidate))
+			{
+				string candgroup = candidate."Object Short Text"
+				if (candgroup == vamgroup)    // takes care of blanks as well
+				{
+					int candabsno = candidate."Absolute Number"
+					print "   FOUND A CONCATENATOR TO absno at " candabsno "\n"
+					// Go through the concatenated attributes
+					for (i = 0 ; i < nConcatAttrs ; i++)
+					{
+					  Skip attrList = listOfAttrLists[i]
+						sattrname = concatAttrs[i]
+						string candattr = candidate.sattrname
+						if (candattr == "") continue // don't bother with blanks
+						// is this attribute value already in the list?
+						bool dummy
+						if (find (attrList, candattr, dummy))
+						{
+						  // Yes, just say so for debug
+						  print "attr '" sattrname "' value '" candattr "' already in list\n"
+						}
+						else
+						{
+						  // NO, we need to concatenate it to the catted value and record in the 
+						  // Skip list
+						  string cattedattr = cattedattrs[i]
+						  if (cattedattr != "")
+						  {
+						    cattedattr = cattedattr "\n" candattr
+						    cattedattrs[i] = cattedattr
+						    put (attrList, candattr, true)
+						  }
+						}  
+					}   // done with all attributes for this candidate object
+					
+					//  Need to delete the link from this object and add it to original
+					// Then delete the object itself
+					// Do we move all the links? YES
+					Link l
+					for l in candidate -> "*" do 
+					{
+					  // where's it going?    
+					  string stgtname = target (l)
+					  ModName_ tgtmod = target (l)
+					  if (null tgtmod) ackAndHalt("Uh oh couldn't read target module " stgtname ", bye")
+					  Object t = target (l)
+					  if (null t)
+					  {
+					    read (fullName(tgtmod), true)  // show target
+					    t = target (l)
+					    if (null t) ackAndHalt ("Uh Oh, something wrong getting target object, bye")
+					  }
+					  // we have the target.  Now need to delete the link and make a new one from
+					  // top VAM object, o, to same target
+					  // Could probably skip the delete step, since a purge (hardDelete) of the
+					  // source requirement also deletes the link.
+					  delete (l)   // does this mess up the loop?  
+					               // No, unless we did a flushDeletions here
+					  t <- o    // feels too simple!
+					}
+					// OK, supposedly, we've replaced the links from candidate to 'o'
+					// Now we can delete candidate.  I guess
+					softDelete (candidate, true)    // throw an error if any incoming links
+				} // done with this candidate object.  Whew.
+			}
+			candidate = next candidate   // hope this still works after softDelete
+		}
+		// Now we need to put the catted attr values into the original object,
+		// and move the links from the candidate object to the original object
+		for (i = 0 ; i < nConcatAttrs ; i++)
+		{
+			sattrname = concatAttrs[i]
+			o.sattrname = cattedattrs[i]
+		}
+		// links
+    
+    
+    // Clean up
+    for (i  = 0 ; i < nConcatAttrs ; i++)
+    {
+      delete listOfAttrLists[i]
+      listOfAttrLists[i] = null
+    }
+    
+  }
+}  
+
+if (errors != "")
+{
+  ack "There are errors to look at.  Please see DXL dialog box, after *** ERRORS *** line"
+  print "*** ERRORS ***\n"
+  print errors
+}

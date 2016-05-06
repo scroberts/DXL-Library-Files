@@ -1,0 +1,1184 @@
+// Copy Views
+
+/* 
+This function allows Views to be copied between DOORS Modules
+*/
+
+const string COPY_VIEWS_ABOUT = "
+   Copyright (C) 2002  Michael Sutherland - Galactic Solutions Group, LLC
+                       michael@galactic-solutions.com
+                       http://galactic-solutions.com
+
+   This library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 2.1 of the License, or (at your option) any later version.
+
+   This library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
+
+   You should have received a copy of the GNU Lesser General Public
+   License along with this library; if not, write to the Free Software
+   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+   or contact http://www.gnu.org
+
+   If you find defects with or improve upon this library, please contact
+   support@galactic-solutions.com
+"
+
+/*
+
+Known issues:
+
+Does not copy Sort Criteria
+Does not copy Window Size and Position settings
+Does not copy View Access Rights settings
+Does not copy Module and current user default View settings
+
+*/
+
+
+/*
+      1.4.3  13 October 2002      Michael Sutherland - Galactic Solutions Group, LLC
+       - Added "About" Tab
+       - Labeled DBE variables
+       - Increased size of copyViewsListDBE
+
+      1.4.2  16 April 2002        Michael Sutherland - Galactic Solutions Group, LLC
+       - Added "contains" (lower case) and "includes"
+         to list of operators used when parsing a Filter string
+
+      1.4.1  13 February 2002     Michael Sutherland - Galactic Solutions Group, LLC
+       - Updated copyViewParameters() to use set() instead of addFilter()
+         so that Filters override and not accumulate when overwriting
+         existing Views
+
+      1.4    13 October 2001      Michael Sutherland - Galactic Solutions Group, LLC
+       - Updated copyViewParameters() so that Main Column Title is not copied
+       - Added Advanced Tab for new "Copy Main Column title" Option
+
+      1.3    09 July 2001         Michael Sutherland - Galactic Solutions Group, LLC
+       - Changed ack to warningBox
+       - Completed setAdvancedViewSettings() with full set of "use" statements
+       - Added display to user counting Views Copied,
+         and added query to user to determine if Target Module should be kept open
+
+      1.2.1  26 April 2001        Michael Sutherland - Galactic Solutions Group, LLC
+       - Updated initial comment for Browse menu
+       - Added Version to Window Titles
+
+      1.2    26 April 2001        Michael Sutherland - Galactic Solutions Group, LLC
+       - Updated copyViewParameters() to not attempt to get Filter string from
+         source Module when filtering is off
+
+      1.1    15 March 2001        Michael Sutherland - Galactic Solutions Group, LLC
+       - Edited so that Filter parsing functionality can be
+         use with "Multi-Module Export.dxl"
+
+      1.0    02 February 2001     Michael Sutherland - Galactic Solutions Group, LLC
+       - Initial Version
+*/
+
+pragma runLim,0
+
+#include <standard/miniExplorer/inc/miniExplorer.inc>
+
+bool object_attribute_exists( string attributeName,
+                              Module moduleToCheck
+                            )
+{
+    ( current ModuleRef__ ) = moduleToCheck
+
+    if ( exists attribute attributeName ) {
+        AttrDef ad = find( current Module, attributeName )
+        if ( ad.object ) {
+           return true
+        } else {
+           return false 
+        }
+    }
+    else {
+        return false
+    }
+}
+
+string trim_spaces(string src) {
+  int first = 0                         // First byte of given string
+  int last = length(src)-1              // Last byte index
+  while (last > 0 && isspace(src[last])) last--         // Skip trailing spaces
+  while (isspace(src[first]) && first<last) first++     // Skip heading spaces
+  if (src[first:last]==" ") return ""   // Only single blank left? - return ""
+  return src[first:last]                // *** EXIT ***
+}
+
+const string LEFT_PARENTHESIS = "("
+const string RIGHT_PARENTHESIS = ")"
+const string LOGICAL_AND = "AND"
+const string LOGICAL_OR = "OR"
+const string LOGICAL_NOT = "NOT"
+
+Regexp PARENTHESIS  = regexp "(\\" LEFT_PARENTHESIS "|\\" RIGHT_PARENTHESIS ")(.*)$"
+Regexp BOOLEAN_OPERATOR = regexp "(" LOGICAL_AND "|" LOGICAL_OR "|" LOGICAL_NOT " )"
+Regexp COMPARITOR_OPERATOR_AND_OPERANDS =
+   regexp "^(.*)(==|!=|>=|<=|<|>|contains|CONTAINS|includes)(.*)$"
+Regexp INCLUDE_OBJECT = regexp "^(Include Object )([0-9].*)$"
+Regexp EXCLUDE_OBJECT = regexp "^(Exclude Object )([0-9].*)$"
+
+Array inFixStack = create(1,1)
+int inFixStackSize = 0
+
+Array inFixToRPNStack = create(1,1)
+int inFixToRPNStackSize = 0
+
+Array RPNStack = create(1,1)
+int RPNStackSize = 0
+
+int priorityOfToken( string token ) {
+// From lowest to highest:
+// Unknown           - Priority 0
+// Left Parenthesis  - Priority 1
+// Logical OR        - Priority 2
+// Logical AND       - Priority 3
+// Relational        - Priority 4
+// Logical NOT       - Priority 5
+
+
+   if ( token == "(" ) {
+      return 1
+   }
+   if ( token == "OR" ) {
+      return 2
+   }
+   if ( token == "AND" ) {
+      return 3
+   }
+   if ( COMPARITOR_OPERATOR_AND_OPERANDS token ) {
+      return 4
+   }
+   if ( token == "NOT" ) {
+      return 5
+   }
+
+   return 0
+}
+
+void processOperator( string operator ) {
+
+   bool doneProcessing = false
+   while ( !doneProcessing ) {
+      // Peek at top of inFixToRPNStack
+      string topStackOperator = get( inFixToRPNStack, inFixToRPNStackSize, 1 )
+
+      if ( ( inFixToRPNStackSize == 0 ) ||
+           ( priorityOfToken( operator ) > priorityOfToken( topStackOperator ) )
+         )
+      {
+         doneProcessing = true
+         // Push onto inFixToRPNStack
+         put( inFixToRPNStack, operator, ++inFixToRPNStackSize, 1 )
+      }
+      else
+      {
+         // Pop from inFixToRPNStackSize
+         inFixToRPNStackSize--
+         // Push onto RPNStack
+         put( RPNStack, topStackOperator, ++RPNStackSize, 1 )
+      }
+   }
+}
+
+void processRightParenthesis( void ) {
+
+   string stackItemToProcess = ""
+
+   bool foundLeftParenthesis = false
+   while ( ( inFixToRPNStackSize > 0 ) && !foundLeftParenthesis )
+   {
+      // Pop from inFixToRPNStack
+      stackItemToProcess = get( inFixToRPNStack, inFixToRPNStackSize--, 1 )
+      if ( stackItemToProcess != LEFT_PARENTHESIS ) {
+         // Push onto RPNStack
+         put( RPNStack, stackItemToProcess, ++RPNStackSize, 1 )
+      }
+      else {
+         foundLeftParenthesis = true
+      }
+   }
+}
+
+void processExpression( string expressionToParse,
+                        Skip &attributesInExpression
+                      )
+{
+   if ( expressionToParse == LEFT_PARENTHESIS ) {
+      // Push onto inFixToRPNStack
+      expressionToParse = ""
+   }
+
+   if ( COMPARITOR_OPERATOR_AND_OPERANDS expressionToParse ) {
+      string operand1 = trim_spaces( expressionToParse[ match 1 ] )
+      string operator = expressionToParse[ match 2 ]
+      string operand2 = trim_spaces( expressionToParse[ match 3 ] )
+
+      // Operand1 is always an Attribute Name
+      if ( !null operand1 ) {
+         Skip attributeValuesReferenced = createString
+         put( attributesInExpression, operand1, attributeValuesReferenced )
+      }
+      
+      if ( !null operator ) {
+      }
+
+      // Operand2 is always an Attribute Value Reference
+      if ( !null operand2 ) {
+         Skip attributeValuesReferenced = null
+         if ( find( attributesInExpression, operand1, attributeValuesReferenced ) ) {
+            put( attributeValuesReferenced, operand2, operand2 )
+         }
+      }
+
+      expressionToParse = ""
+   }
+
+   if ( BOOLEAN_OPERATOR expressionToParse ) {
+      string operator = expressionToParse[ match 1 ]
+      expressionToParse = ""
+   }
+
+   if ( INCLUDE_OBJECT expressionToParse ) {
+      string operator = trim_spaces( expressionToParse[ match 1 ] )
+      string operand  = trim_spaces( expressionToParse[ match 2 ] )
+      expressionToParse = ""
+   }
+
+   if ( EXCLUDE_OBJECT expressionToParse ) {
+      string operator = trim_spaces( expressionToParse[ match 1 ] )
+      string operand  = trim_spaces( expressionToParse[ match 2 ] )
+      expressionToParse = ""
+   }
+
+   if ( expressionToParse == RIGHT_PARENTHESIS ) {
+      expressionToParse = ""
+   }
+
+}
+
+Skip parse_filter_string( string filterStr ) {
+
+   // ( string attributeName -> Skip )
+   Skip attributesInExpression = createString
+
+   // Compound Filter Statements are always delimited with Parenthesis
+   while ( PARENTHESIS filterStr ) {
+       
+      // Gather all parsed elements before attempting to process them
+      // so the Regexp Global match pointers are not lost
+      string expressionToParse = ""
+      if ( ( start 1 ) > 0 ) {
+         expressionToParse = trim_spaces( filterStr[ 0 : ( start 1 ) - 1 ] )
+      }
+      string parenthesesFound = filterStr[ match 1 ]
+      filterStr = trim_spaces( filterStr[ match 2 ] )
+
+      if ( !null expressionToParse ) {
+         put( inFixStack, expressionToParse, ++inFixStackSize, 1 )
+         processExpression( expressionToParse,
+                            attributesInExpression
+                          )
+      }
+
+      put( inFixStack, parenthesesFound, ++inFixStackSize, 1 )
+      processExpression( parenthesesFound,
+                         attributesInExpression
+                       )
+
+   }
+
+   if ( !null filterStr ) {
+      put( inFixStack, filterStr, ++inFixStackSize, 1 )
+      processExpression( filterStr,
+                         attributesInExpression
+                       )
+   }
+   
+   return attributesInExpression
+}
+
+bool filter_elements_are_valid_for_module( Module targetModuleHandle,
+                                           string filterString,
+                                           Buffer &errorMessage
+                                         )
+{
+   bool filterElementsAreValid = true
+   Skip attributesInFilterString = parse_filter_string( filterString )
+   Skip attributeValuesReferenced
+   for attributeValuesReferenced in attributesInFilterString do {
+      string attributeName = ( string key attributesInFilterString )
+
+      // The following DOORS meta-Attributes are assumed
+      // to always be in any DOORS Module
+      if ( attributeName == "Object Level" ) break
+      if ( attributeName == "Object Number" ) break
+      if ( attributeName == "Object Identifier" ) break
+
+      // Attribute must exist
+      if ( !object_attribute_exists( attributeName, targetModuleHandle ) ) {
+         errorMessage += "Attribute '" attributeName "' does not exist.\n"
+         filterElementsAreValid = false
+      }
+      else {
+         AttrDef ad = find( targetModuleHandle, attributeName )
+         AttrType at = ad.type
+
+         // If type of Attribute is Enumerated, check
+         // type in Target Module
+         if ( at.type "" == "Enumeration" ) {
+            string attributeValueReferenced
+            for attributeValueReferenced in attributeValuesReferenced do {
+               bool attributeValueReferenceFound = false
+               int i = 0
+               for ( i = 0 ; i < at.size ; i++ ) {
+                  string enumTypeValue = at.strings[i]
+                  if ( enumTypeValue == attributeValueReferenced ) {
+                     attributeValueReferenceFound = true
+                  }
+               }
+               if ( !attributeValueReferenceFound ) {
+                  errorMessage += "Attribure Value '" attributeValueReferenced "' not Valid for Enumerated Type '" at.name "'.\n"
+                  filterElementsAreValid = false
+               }
+            }
+         }
+      }
+   }
+
+   return filterElementsAreValid
+}
+
+const string copyViewsMainTitle       = "Copy Views"
+const string copyViewsExporterVersion = "1.4.3"
+const string copyViewsTitle           = copyViewsMainTitle " (v" copyViewsExporterVersion ") "
+
+const string copyViewsTabLabels[] = { "General", "Advanced", "About" }
+
+const int COPY_VIEWS_GENERAL_TAB  = 0
+const int COPY_VIEWS_ADVANCED_TAB = 1
+const int COPY_VIEWS_ABOUT_TAB = 2
+
+DB  copyViewsDB = null
+DBE theCopyViewsTabDBE
+DBE sourceModuleFieldDBE
+DBE targetModuleFieldDBE
+DBE targetButtonDBE
+DBE copyViewsListDBE
+DBE copyMainColumnTitleDBE
+DBE aboutTextDBE
+DBE copyViewsOKButtonDBE
+DBE copyViewsApplyBtnDBE
+DBE copyViewsCancelBtnDBE
+
+Skip copyViewsTabSkip
+Skip copyViewsGeneralTabSkip
+Skip copyViewsAdvancedTabSkip
+Skip copyViewsAboutTabSkip
+
+Trigger copyViewsTrigger
+Module sourceModuleHandle
+
+Skip getViewNamesInModule( Module m ) {
+   Skip viewNames = create
+   string viewName
+   int viewCount = 0
+
+   for viewName in views m do {
+      viewCount++
+      put (viewNames, viewCount, viewName)
+   }
+
+   return viewNames
+}
+
+void setViewAdvancedSettings( Module sourceModuleHandle,
+                              Module targetModuleHandle,
+                              ViewDef sourceModuleViewDef,
+                              ViewDef targetModuleViewDef
+                            )
+{
+   // ---------------------------------------------------
+   // Filtered objects' ancestors
+   // ---------------------------------------------------
+   if ( useAncestors( sourceModuleViewDef ) ) {
+      useAncestors( targetModuleViewDef, true ) 
+      ancestors( ancestors( sourceModuleHandle ) )
+   }
+   else {
+      useAncestors( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Filtered objects' decendants
+   // ---------------------------------------------------
+   if ( useDescendants( sourceModuleViewDef ) ) {
+      useDescendants( targetModuleViewDef, true ) 
+      descendants( descendants( sourceModuleHandle ) )
+   }
+   else {
+      useDescendants( targetModuleViewDef, false )
+   }
+   
+   // ---------------------------------------------------
+   // Current object
+   // ---------------------------------------------------
+   if ( useCurrent( sourceModuleViewDef ) ) {
+      useCurrent( targetModuleViewDef, true ) 
+   }
+   else {
+      useCurrent( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Current selection
+   // ---------------------------------------------------
+   if ( useSelection( sourceModuleViewDef ) ) {
+      useSelection( targetModuleViewDef, true ) 
+   }
+   else {
+      useSelection( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Columns
+   // ---------------------------------------------------
+   if ( useColumns( sourceModuleViewDef ) ) {
+      useColumns( targetModuleViewDef, true ) 
+   }
+   else {
+      useColumns( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Table cells - Filter table contents	
+   // ---------------------------------------------------
+   if ( useFilterTables( sourceModuleViewDef ) ) {
+      useFilterTables( targetModuleViewDef, true ) 
+   }
+   else {
+      useFilterTables( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Columns - Graphics column
+   // ---------------------------------------------------
+   if ( useGraphicsColumn( sourceModuleViewDef ) ) {
+      useGraphicsColumn( targetModuleViewDef, true ) 
+   }
+   else {
+      useGraphicsColumn( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Module Explorer
+   // ---------------------------------------------------
+   if ( useShowExplorer( sourceModuleViewDef ) ) {
+      useShowExplorer( targetModuleViewDef, true ) 
+      if ( showingExplorer( sourceModuleHandle ) ) {
+         showExplorer( targetModuleHandle )
+      }
+      else {
+         hideExplorer( targetModuleHandle )
+      }
+   }
+   else {
+      useShowExplorer( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Graphics mode
+   // ---------------------------------------------------
+   if ( useGraphics( sourceModuleViewDef ) ) {
+      useGraphics( targetModuleViewDef, true ) 
+      graphics( graphics( sourceModuleHandle ) )
+   }
+   else {
+      useGraphics( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Outlining
+   // ---------------------------------------------------
+   if ( useOutlining( sourceModuleViewDef ) ) {
+      useOutlining( targetModuleViewDef, true ) 
+      outlining( outlining( sourceModuleHandle ) )
+   }
+   else {
+      useOutlining( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Outlining - Compression
+   // ---------------------------------------------------
+   if ( useCompression( sourceModuleViewDef ) ) {
+      useCompression( targetModuleViewDef, true ) 
+   }
+   else {
+      useCompression( targetModuleViewDef, false )
+   }
+   // Note: DOORS 5.1 DXL manual incorrectly specifies "useCompress()"
+
+   // ---------------------------------------------------
+   // Display Level
+   // ---------------------------------------------------
+   if ( useLevel( sourceModuleViewDef ) ) {
+      useLevel( targetModuleViewDef, true ) 
+      level( level ( sourceModuleHandle ) )
+   }
+   else {
+      useLevel( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Sorting
+   // ---------------------------------------------------
+   if ( useSorting( sourceModuleViewDef ) ) {
+      useSorting( targetModuleViewDef, true ) 
+      // Note: "sorting(bool onOff)" not handled,
+      //       since Sort criteria are not currently copied
+   }
+   else {
+      useSorting( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Filtering
+   // ---------------------------------------------------
+   if ( useFiltering( sourceModuleViewDef ) ) {
+      useFiltering( targetModuleViewDef, true ) 
+      // Note: "filtering(bool onOff)" handled elsewhere  
+   }
+   else {
+      useFiltering( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Deleted Objects
+   // ---------------------------------------------------
+   if ( useShowDeleted( sourceModuleViewDef ) ) {
+      useShowDeleted( targetModuleViewDef, true ) 
+      ( current ModuleRef__ ) = sourceModuleHandle
+      bool showDeletedObjectsInTarget = showDeletedObjects
+      ( current ModuleRef__ ) = targetModuleHandle
+      showDeletedObjects( showDeletedObjectsInTarget )
+   }
+   else {
+      useShowDeleted( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Pictures
+   // ---------------------------------------------------
+   if ( useShowPictures( sourceModuleViewDef ) ) {
+      useShowPictures( targetModuleViewDef, true ) 
+      showPictures( showPictures( sourceModuleHandle ) )
+   }
+   else {
+      useShowPictures( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Table cells	
+   // ---------------------------------------------------
+   if ( useShowTables( sourceModuleViewDef ) ) {
+      useShowTables( targetModuleViewDef, true ) 
+      showTables( showTables( sourceModuleHandle ) )
+   }
+   else {
+      useShowTables( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Link Arrows
+   // ---------------------------------------------------
+   if ( useShowLinkIndicators( sourceModuleViewDef ) ) {
+      useShowLinkIndicators( targetModuleViewDef, true ) 
+      linkIndicators( linkIndicators( sourceModuleHandle ) )
+      //Note:  No need to use "linksVisible(bool onOff)"
+   }
+   else {
+      useShowLinkIndicators( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Graphics mode - Graphics links
+   // ---------------------------------------------------
+   if ( useShowLinks( sourceModuleViewDef ) ) {
+      useShowLinks( targetModuleViewDef, true ) 
+      showGraphicsLinks( showGraphicsLinks( sourceModuleHandle ) )
+   }
+   else {
+      useShowLinks( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Columns - Graphics datatips
+   // ---------------------------------------------------
+   if ( useTooltipColumn( sourceModuleViewDef ) ) {
+      useTooltipColumn( targetModuleViewDef, true ) 
+      showGraphicsDatatips( showGraphicsDatatips( sourceModuleHandle ) )
+   }
+   else {
+      useTooltipColumn( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Window size and position
+   // ---------------------------------------------------
+   if ( useWindows( sourceModuleViewDef ) ) {
+      useWindows( targetModuleViewDef, true )
+   }
+   else {
+      useWindows( targetModuleViewDef, false )
+   }
+
+   // ---------------------------------------------------
+   // Change Bars (not on View - Advanced)
+   // ---------------------------------------------------
+   // Note: no "use" command available for Change Bars
+   showChangeBars( showChangeBars( sourceModuleHandle ) )
+}
+
+bool copyViewParameters( Module sourceModuleHandle,
+                         Module targetModuleHandle,
+                         string viewNameToCopy,
+                         bool copyMainColumnTitleDBE
+                       )
+{
+   // Reserved name, cannot Copy View
+   if ( viewNameToCopy == "Standard view" )
+      return false
+
+   // Set Source Module as current
+   ( current ModuleRef__ ) = sourceModuleHandle
+
+   // Attempt to Read View
+   if ( !canRead( sourceModuleHandle, view viewNameToCopy ) ) {
+      return false
+   }
+   // Load View
+   if ( !load( sourceModuleHandle, view viewNameToCopy ) )
+      return false
+
+   // Before switching current Module context to Target Module,
+   // get information about Source Module
+
+   // Get Source Module View Definition
+   ViewDef sourceModuleViewDef = get( sourceModuleHandle, view viewNameToCopy )
+
+   // Get Source Module Filter
+   Filter sourceModuleFilter = current Filter
+   string sourceModuleFilterString = ""
+   if ( filtering sourceModuleHandle ) {
+      if ( !null sourceModuleFilter ) {
+         sourceModuleFilterString = stringOf( sourceModuleHandle, sourceModuleFilter )
+      }
+   }
+
+   // Switch current Module context to Target Module
+   ( current ModuleRef__ ) = targetModuleHandle
+
+   // Load Standard View in Target Module
+   if ( !load( targetModuleHandle, view "Standard view" ) ) {
+      return false
+   }
+
+   // Check Access Rights for writing View in Target Module
+   if ( !canWrite( targetModuleHandle, view viewNameToCopy ) ) {
+      warningBox "No Access to Save View '" viewNameToCopy "'"
+      return false
+   }
+
+   // Check if Target Module already has a View
+   // that has the same name as the View to Copy
+   if ( load( targetModuleHandle, view viewNameToCopy ) ) 
+      if ( !( confirm "The View '" viewNameToCopy "' already exists in Target Module\n\n" //-
+                                                  "Do you want to overwrite it?" ) )
+         return false
+
+   // Create View Definition for Target Module
+   ViewDef targetModuleViewDef = create( targetModuleHandle, true )
+
+   // --------------------------------------------
+   // Copy Advanced Settings
+   // --------------------------------------------
+   setViewAdvancedSettings( sourceModuleHandle,
+                            targetModuleHandle,
+                            sourceModuleViewDef,
+                            targetModuleViewDef
+                          )
+
+   // Store Error Messages for user
+   Buffer errorMessageBuffer = create
+
+   // --------------------------------------------
+   // Copy Filter
+   // --------------------------------------------
+
+   bool filterSetupSuccessful = true
+   if ( useFiltering( sourceModuleViewDef ) ) {
+      // Turn off Filtering in Target Module
+      filtering off
+   
+      // Apply Filter to Target Module
+      if ( filtering sourceModuleHandle ) {
+         if ( !null sourceModuleFilterString ) {
+            // Source Module has a Filter Applied in View
+
+            if ( filter_elements_are_valid_for_module( targetModuleHandle,
+                                                       sourceModuleFilterString,
+                                                       errorMessageBuffer
+                                                     )
+               )
+            {
+               // Trap any errors attempting to apply Filter
+               noError
+               set( targetModuleHandle, sourceModuleFilter )
+               string filterAddErrorMessage = lastError
+               if ( null filterAddErrorMessage ) {
+                  filtering on
+               }
+               else {
+                  filterSetupSuccessful = false
+                  errorMessageBuffer += filterAddErrorMessage
+               }
+            }
+            else {
+               filterSetupSuccessful = false
+            }
+         }
+      }
+   }
+   
+   if ( !filterSetupSuccessful ) {
+      warningBox "Problem copying View '" viewNameToCopy "'\n\n" //-
+                 "Cannot apply Filter to Target Module\n\n" //-
+                 stringOf( errorMessageBuffer )
+   }
+   
+   setempty( errorMessageBuffer )
+
+   // --------------------------------------------
+   // Copy Columns
+   // --------------------------------------------
+
+   bool columnSetupSuccessful = true
+   if ( useColumns( sourceModuleViewDef ) ) {
+
+      // Count Columns in Target Module View
+      Column targetColumn
+      int targetColumnCount = 0
+      for targetColumn in targetModuleHandle do {
+         targetColumnCount++
+      }
+
+      // Delete Columns in Target Module View
+      int deleteColumnCount
+      for deleteColumnCount in 1:targetColumnCount do {
+         delete column 0
+      }
+   	
+      // Loop through Columns in Source Module View,
+      // and replicate in Target Module View
+      Column sourceColumn
+      int sourceColumnCount = 0
+      for sourceColumn in sourceModuleHandle do {
+         sourceColumnCount++
+   
+         targetColumn = insert column( targetModuleHandle, sourceColumnCount )
+   
+         // Set Target Column Content (Attribute, Main, DXL)
+         string columnAttributeName = attrName sourceColumn
+         if ( null columnAttributeName ) {
+            if ( main sourceColumn )
+               main targetColumn
+            else {
+               dxl( targetColumn, dxl( sourceColumn ) )
+            }
+         }
+         else {
+            if ( ( columnAttributeName == "Object Level" ) ||
+                 ( columnAttributeName == "Object Number" ) ||
+                 ( columnAttributeName == "Object Identifier" ) ||
+                 ( object_attribute_exists( columnAttributeName, targetModuleHandle ) )
+               )
+            {
+               attribute( targetColumn, columnAttributeName )
+            }
+            else {
+               errorMessageBuffer += "Attribute '" columnAttributeName "' does not exist.\n"
+               columnSetupSuccessful = false
+            }
+         }		
+   
+         // Set Target Column Color
+         string colorAttributeName = color sourceColumn
+         if ( !null colorAttributeName ) {
+            if ( exists attribute colorAttributeName ) {
+               color( targetColumn, colorAttributeName )
+            }
+         }
+         
+         // Set Target Column Graphics
+         bool targetColumnGraphics = graphics sourceColumn 
+         if ( targetColumnGraphics ) {
+            graphics( targetColumn )
+         }
+   
+         // Set Target Column Info
+         bool targetColumnInfo = info sourceColumn
+         if ( targetColumnInfo ) {
+            info( targetColumn )
+         }
+   
+         // Set Target Column Justification
+         Justification targetColumnJustify = justify sourceColumn
+         justify( targetColumn, targetColumnJustify )
+   
+         // Set Target Column Title
+         if ( 
+              ( ( main sourceColumn ) && ( copyMainColumnTitleDBE ) ) ||
+              !( main sourceColumn )
+            )
+         {
+            string targetColumnTitle = title sourceColumn
+            title( targetColumn, targetColumnTitle )
+         }
+         
+         // Set Target Column Width
+         int sourceColumnWidth = width sourceColumn
+         width( targetColumn, sourceColumnWidth )
+
+      }
+   }
+
+   if ( !columnSetupSuccessful ) {
+      warningBox "Problem copying View '" viewNameToCopy "'\n\n" //-
+                 "Cannot create Column(s) in Target Module\n\n" //-
+                 stringOf( errorMessageBuffer )
+   }
+
+   delete errorMessageBuffer
+
+   if  ( filterSetupSuccessful && columnSetupSuccessful ) {
+      save( targetModuleHandle, view viewNameToCopy, targetModuleViewDef )
+      return true
+   }
+   else {
+      return false
+   }
+}
+
+bool copyViews( DB x ) {
+
+   ModName_ sourceModuleName = module( fullName( sourceModuleHandle ) "" )
+   if ( null sourceModuleName ) {
+      warningBox( "Cannot open Module '" fullName( sourceModuleHandle ) "'." )
+      return false
+   }
+
+   string targetModuleName = get targetModuleFieldDBE
+   if ( targetModuleName == "" ) {
+      warningBox( "No destination Module is selected" )
+      return false
+   }
+
+   if ( targetModuleName == fullName( sourceModuleHandle ) ) {
+      warningBox "Please select a Target Module that is different from the Source Module."
+      return false
+   }
+
+   ModName_ targetModuleName2 = module targetModuleName
+   if ( null targetModuleName2 ) {
+      warningBox( "Cannot open Module '" targetModuleName "'." )
+      return false
+   }
+
+   // Open Target Module for Read in background
+   // Note: Target Module does not need to be opened in Edit mode to modify Views,
+   //       but it does need to be Visible, and will be made so elsewhere
+   Module targetModuleHandle = read( targetModuleName, false )
+
+   if ( null targetModuleHandle ) {
+      warningBox "Target Module '" targetModuleName "' cannot be Opened"
+      return false
+   }
+
+   // Count selected Views
+   int viewsToCopyCount = 0
+   string viewNameSelected
+   for viewNameSelected in copyViewsListDBE do {
+      viewsToCopyCount++
+   }
+    
+   if ( viewsToCopyCount == 0 ) {
+      warningBox "Please Select one or more Views to Copy"
+      return false
+   }
+
+   // Save Original View Name, so it can be returned to
+   string sourceModuleOriginalViewName = currentView( sourceModuleHandle )
+
+   // Re-Open Module as Visible, which is required for some operations
+   targetModuleHandle = read( fullName( targetModuleHandle ), true )
+
+   int viewsSuccessfullyCopiedCount = 0
+   for viewNameSelected in copyViewsListDBE do {
+      if ( copyViewParameters( sourceModuleHandle,
+                               targetModuleHandle,
+                               viewNameSelected,
+                               get copyMainColumnTitleDBE
+                             )
+         )
+      {
+         viewsSuccessfullyCopiedCount++
+      }
+      else {
+         warningBox "Could not copy View '" viewNameSelected "'"
+      }
+   }
+
+   // Re-Open Module as not Visible
+   targetModuleHandle = read( fullName( targetModuleHandle ), false )
+
+   // Set Source Module back to Original View
+   ( current ModuleRef__ ) = sourceModuleHandle
+   load( sourceModuleHandle, view sourceModuleOriginalViewName )
+
+   // Inform user of count of Views successfully copied,
+   // and let the user choose if the Target Module should be left Open
+   string targetModuleCloseChoices[] = { "Close" , "Open Target Module" }
+   int targetModuleCloseChoice =
+      query( "Copied (" viewsSuccessfullyCopiedCount "/" viewsToCopyCount ") Views\n\n" //-
+             "Keep Target Module Open?",
+              targetModuleCloseChoices
+           )
+
+   if ( targetModuleCloseChoice == 0 ) 
+      close targetModuleHandle
+   else {
+      // Re-Open Module as Visible
+      targetModuleHandle = read( fullName( targetModuleHandle ), true )
+   }
+
+   if ( viewsSuccessfullyCopiedCount == viewsToCopyCount ) {
+      return true
+   }
+   else {
+      return false
+   }
+}
+
+void browseTargetCB( DBE x ) {
+   string currentTarget      = get( targetModuleFieldDBE )
+   Item   currentItem        = item( currentTarget )
+   Folder sourceModuleFolder = null
+    
+   if ( !null currentItem ) {
+      if ( type( currentItem ) == "Folder" ) {
+         sourceModuleFolder = folder( currentItem )
+      }
+      else {
+         sourceModuleFolder = getParentFolder( currentItem )
+     }
+   }
+
+   string targetModuleName = 
+      fnMiniExplorer( copyViewsDB, 
+                      sourceModuleFolder,
+                      MINI_EXP_FORMAL_MODS,
+                      "Browse",
+                      "Select a Target Module"
+                    )
+
+   if ( !null targetModuleName )
+      set( targetModuleFieldDBE, targetModuleName )
+}
+
+void copyViewsOkCB( DBE x ) {
+   if ( copyViews( DB copyViewsDB ) ) {
+      delete  copyViewsTrigger
+      hide    copyViewsDB
+      destroy copyViewsDB
+   }
+   else {
+      raise copyViewsDB
+   }
+}
+
+void copyViewsApplyCB( DBE x ) {
+   copyViews( DB copyViewsDB )    
+   raise copyViewsDB
+}
+
+void copyViewsCancelCB( DBE x ) {
+   delete  copyViewsTrigger
+   hide    copyViewsDB
+   destroy copyViewsDB
+}
+
+void copyViewsCloseCB( DB x)  {
+   delete  copyViewsTrigger
+   hide    copyViewsDB
+   destroy copyViewsDB    
+}
+
+bool copyViewsCloseModuleTrig( Trigger t ) {
+   hide    copyViewsDB
+   destroy copyViewsDB
+   return true
+}
+
+void copyViewsTabSelectFn( DBE theTab ) {
+    int selection = get theTab
+    showSelectedTab( copyViewsTabSkip, selection ) 
+}
+
+void doCopyViewsGeneralTab( DB copyViewsDB,
+                            DBE theCopyViewsTabDBE,
+                            Skip copyViewsGeneralTabSkip
+                          )
+{
+   sourceModuleFieldDBE  = field( copyViewsDB, "Source Module:", "", 40, true )
+   targetModuleFieldDBE  = field( copyViewsDB, "Target Module:", "", 40 )
+   targetButtonDBE = button( copyViewsDB, "Browse...", browseTargetCB, false )
+   string listItems[] = {}
+   copyViewsListDBE = listView( copyViewsDB, listViewOptionMultiselect, 450, 10, listItems )
+
+   sourceModuleFieldDBE->"top"->"inside"->theCopyViewsTabDBE
+   sourceModuleFieldDBE->"left"->"inside"->theCopyViewsTabDBE
+   sourceModuleFieldDBE->"bottom"->"unattached"
+
+   targetModuleFieldDBE->"top"->"spaced"->sourceModuleFieldDBE
+   targetModuleFieldDBE->"left"->"aligned"->sourceModuleFieldDBE
+
+   targetButtonDBE->"top"->"spaced"->sourceModuleFieldDBE
+   targetButtonDBE->"left"->"spaced"->sourceModuleFieldDBE
+
+   int index = 0
+   put( copyViewsGeneralTabSkip, index++, sourceModuleFieldDBE )
+   put( copyViewsGeneralTabSkip, index++, targetModuleFieldDBE )
+   put( copyViewsGeneralTabSkip, index++, targetButtonDBE )
+   put( copyViewsGeneralTabSkip, index++, copyViewsListDBE )
+}
+
+void doCopyViewsAdvancedTab( DB copyViewsDB,
+                             DBE theCopyViewsTabDBE,
+                             Skip copyViewsAdvancedTabSkip
+                           )
+{
+   copyMainColumnTitleDBE = toggle( copyViewsDB, "Copy Main Column title", false )
+
+   copyMainColumnTitleDBE->"top"->"inside"->theCopyViewsTabDBE
+   copyMainColumnTitleDBE->"left"->"inside"->theCopyViewsTabDBE
+   copyMainColumnTitleDBE->"bottom"->"unattached"
+
+   int index = 0
+   put( copyViewsAdvancedTabSkip, index++, copyMainColumnTitleDBE )
+}
+
+void doCopyViewsAboutTab( DB copyViewsDB,
+                          DBE theCopyViewsTabDBE,
+                          Skip copyViewsAboutTabSkip
+                        )
+{
+   aboutTextDBE = text( copyViewsDB, copyViewsTitle, COPY_VIEWS_ABOUT, 40, 250, true )
+
+   aboutTextDBE->"top"->"inside"->theCopyViewsTabDBE
+   aboutTextDBE->"left"->"inside"->theCopyViewsTabDBE
+   aboutTextDBE->"right"->"inside"->theCopyViewsTabDBE
+
+   int index = 0
+   put( copyViewsAboutTabSkip, index++, aboutTextDBE )
+}
+
+void doCopyViews( void ) {
+
+   if ( null copyViewsDB ) {
+
+      sourceModuleHandle = current Module
+        
+      copyViewsDB = create( current Module, copyViewsTitle, styleFixed | styleCentered )
+
+      copyViewsTabSkip = create
+
+      theCopyViewsTabDBE = tab( copyViewsDB, copyViewsTabLabels, 200, 200, copyViewsTabSelectFn )
+
+      copyViewsGeneralTabSkip = create
+      doCopyViewsGeneralTab( copyViewsDB, theCopyViewsTabDBE, copyViewsGeneralTabSkip )
+      put( copyViewsTabSkip, COPY_VIEWS_GENERAL_TAB, copyViewsGeneralTabSkip )
+
+      copyViewsAdvancedTabSkip = create
+      doCopyViewsAdvancedTab( copyViewsDB, theCopyViewsTabDBE, copyViewsAdvancedTabSkip )
+      put( copyViewsTabSkip, COPY_VIEWS_ADVANCED_TAB, copyViewsAdvancedTabSkip )
+
+      copyViewsAboutTabSkip = create
+      doCopyViewsAboutTab( copyViewsDB, theCopyViewsTabDBE, copyViewsAboutTabSkip )
+      put( copyViewsTabSkip, COPY_VIEWS_ABOUT_TAB, copyViewsAboutTabSkip )
+    
+      copyViewsCancelBtnDBE = button( copyViewsDB, "Cancel", copyViewsCancelCB, styleStandardSize | styleIsCloseBtn )
+      copyViewsApplyBtnDBE  = button( copyViewsDB, "Apply",  copyViewsApplyCB, false )
+      copyViewsOKButtonDBE  = button( copyViewsDB, "OK",     copyViewsOkCB, styleStandardSize | styleIsDefault )
+
+      theCopyViewsTabDBE->"top"->"form"
+      theCopyViewsTabDBE->"left"->"form"
+      theCopyViewsTabDBE->"right"->"form"
+      theCopyViewsTabDBE->"bottom"->"form"
+     
+      copyViewsCancelBtnDBE->"top"->"flush"->copyViewsListDBE
+      copyViewsCancelBtnDBE->"right"->"form"
+      copyViewsCancelBtnDBE->"left"->"unattached"
+      copyViewsCancelBtnDBE->"bottom"->"form"
+        
+      copyViewsApplyBtnDBE->"top"->"flush"->copyViewsListDBE
+      copyViewsApplyBtnDBE->"right"->"flush"->copyViewsCancelBtnDBE
+      copyViewsApplyBtnDBE->"left"->"unattached"
+      copyViewsApplyBtnDBE->"bottom"->"form"
+        
+      copyViewsOKButtonDBE->"top"->"flush"->copyViewsListDBE
+      copyViewsOKButtonDBE->"right"->"flush"->copyViewsApplyBtnDBE
+      copyViewsOKButtonDBE->"left"->"unattached"
+      copyViewsOKButtonDBE->"bottom"->"form"
+
+      showSelectedTab( copyViewsTabSkip, COPY_VIEWS_GENERAL_TAB )
+
+      close( copyViewsDB, false, copyViewsCloseCB )     
+      copyViewsTrigger = trigger( module, close, 10, copyViewsCloseModuleTrig )
+
+      set( sourceModuleFieldDBE, fullName( sourceModuleHandle ) )
+      set( targetModuleFieldDBE, fullName( sourceModuleHandle ) )
+    
+      realize copyViewsDB
+
+      setFocus( targetModuleFieldDBE )
+
+      // Initialize Views List Column
+      insertColumn( copyViewsListDBE, 0, "Source Module View Names", 330, iconNone ) 
+
+      // Populate list of Views displayed for User selection
+      Skip viewNamesInSourceModule = getViewNamesInModule( sourceModuleHandle )
+      string viewName
+      int viewCount = 0
+      for viewName in viewNamesInSourceModule do {
+         insert( copyViewsListDBE, viewCount, viewName )
+         viewCount++
+      }
+   }
+   
+   showSelectedTab( copyViewsTabSkip, COPY_VIEWS_GENERAL_TAB )
+
+   show copyViewsDB
+}
+
+if ( !null( current Module ) && inplaceEditOff( current Module, true ) ) {
+    doCopyViews()
+}

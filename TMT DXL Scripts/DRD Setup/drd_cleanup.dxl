@@ -1,0 +1,204 @@
+// Cleanup DRD Module Post-Import
+/* 
+Set the values of IsReq and Paragraph Style after importing a new DRD module - for TMT
+March 2016
+
+Version: 	Post-Import DRD Cleanup v1.dxl
+
+Description: 	This DXL script automatically populates the IsReq and Paragraph Style fields.
+		This is intended to be run after importing a new DRD module.
+		
+Process:	This is the logic used:
+		1) Requirements: object text starts with "[REQ-"
+		2) Discussions: object text starts with "Discussion:"
+		3) Figure Captions: object text starts with "Figure"
+		4) Table Captions: object text starts with "Table"
+		5) Headers: object heading is not empty
+		6) DOORS tables: uses the cell(), row(), and table() functions
+		7) intro sections: object number < "3"
+
+		Requirements found inside DOORS table cells are handled differently.
+		Continuing requirements and discussions retain the proper settings.
+		Non table cells in the intro sections (1 & 2) are given Parargaph Style: Requirement
+		only so they get the desired left indent.  IsReq is set to false.
+
+		Each test in the dxl code ends with a "continue" statement, jumping to the
+		next object in the module.  This speeds things up and makes the many IF statements
+		behave almost like a CASE statement.
+
+		The script counts the objects that are skipped and reports this to the user.
+
+Assumptions:	The script requires the following conditions for proper function:
+		1) The user has opened the desired module in exclusive edit mode.
+	
+Directions:	1) Open the desired DRD module in exclusive edit mode
+		2) In that module window, select menu item: Tools / Edit DXL...
+		3) Paste this script code into the dialog window and click "Run"
+
+Notes:		1) The script does not save the module, the user should review the changes and 
+		   save the module if satisfied.
+		2) The output to the DXL dialog window ends with a list of actions for the
+			user to perform manually.
+
+*/
+// pragma runLim, 0				// suppress DXL execution timeout
+
+
+
+Module m = current
+if (null m)					// Test if any module is open
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)				// Test if current module is open exclusive edit
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+Object o 
+string obj_text
+string obj_header
+string obj_number
+string prev_obj = ""
+int count = 0
+int skipped = 0
+
+
+
+for o in m do {					// Step through the objects in this module
+
+   count++
+   obj_text = o."Object Text"			// get the object text in string format (no rich text)
+   obj_header = o."Object Heading"
+   obj_number = number(o)			// is a string, e.g. 1.4-2-5 
+   o."IsReq" = false				// set IsReq to false by default
+
+
+   if (obj_text[0:4] == "[REQ-")		// is this object a requirement
+   {
+      o."IsReq" = true
+      o."Paragraph Style" = "<Object Text:Requirement>"
+      prev_obj = "requirement"
+
+      if (cell(o))				// is this reqt in a DOORS table cell
+      {
+         o."Paragraph Style" = "<Object Text:Normal>"
+      }
+
+      continue
+   }
+
+   if (obj_text[0:10] == "Discussion:")		// is this object a discussion
+   {
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Discussion>"
+      prev_obj = "discussion"
+
+      continue
+   }
+
+   if (obj_text[0:5] == "Figure")		// is this object a figure caption
+   {
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Figure Caption>"
+      prev_obj = "figure caption"
+
+      continue
+   }
+
+   if (obj_text[0:4] == "Table")		// is this object a table caption
+   {
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Table Caption>"
+      prev_obj = "table caption"
+
+      continue
+   }
+
+   if (obj_header != "")			// is this object a header
+   {
+      o."IsReq" = false
+      if (level(o) == 1) { o."Paragraph Style" = "<Object Heading:Heading 1>" }
+      if (level(o) == 2) { o."Paragraph Style" = "<Object Heading:Heading 2>" }
+      if (level(o) == 3) { o."Paragraph Style" = "<Object Heading:Heading 3>" }
+      if (level(o) == 4) { o."Paragraph Style" = "<Object Heading:Heading 4>" }
+      if (level(o) == 5) { o."Paragraph Style" = "<Object Heading:Heading 5>" }
+      if (level(o) == 6) { o."Paragraph Style" = "<Object Heading:Heading 6>" }
+      if (level(o) == 7) { o."Paragraph Style" = "<Object Heading:Heading 7>" }
+      if (level(o) > 7) { print "WARNING: Heading object level > 7 \n" }
+
+      prev_obj = "header"
+
+      continue
+   }
+
+   if (cell(o) || row(o) || table(o))		// is this object in a DOORS table
+   {
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Normal>"
+      prev_obj = "table cell"
+
+      continue
+   }
+
+   if (oleIsObject(o) && obj_text == "") 	// does obj contain only an OLE object
+   {						// if so, call it an image
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Image>"
+
+      continue
+   }
+
+   if (obj_number < "3") 		// is this object in the intro sections 1 or 2
+   {					// set paragraph style to reqt only to get the left indent
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Requirement>"
+
+      continue
+   }
+
+
+
+
+// This object was none of the above choices, therefore it is likely to be a continuation 
+// of the previous object.  Assume continuation if the previous obj was a reqt or discussion.
+// Otherwise, skip this object.  It can be set manually.
+
+
+   if (prev_obj == "requirement") 			// assume continuation of this reqt
+   {
+      o."IsReq" = true
+      o."Paragraph Style" = "<Object Text:Requirement>"
+      prev_obj = "requirement"
+
+      continue
+   }
+
+   if (prev_obj == "discussion") 			// assume continuation of this discussion
+   {
+      o."IsReq" = false
+      o."Paragraph Style" = "<Object Text:Discussion>"
+      prev_obj = "discussion"
+
+      continue
+   }
+
+   skipped++
+
+
+}						// end of loop over objects in the module
+
+
+print count " objects were processed. \n"
+print skipped " objects were skipped. \n\n"
+print "Perform these steps MANUALLY: \n"
+print "  1. look for any empty IsReq fields. \n"
+print "  2. look for any empty Paragraph Style fields. \n"
+print "  3. clear Paragraph Style in Proposed New Requirements or other areas. \n"
+print "  4. check that continued Reqts and Discussions are set properly. \n"
+print "  5. check that IsReq = true for any table cells containing requirements. \n"
+print "  6. look for any blank objects and confirm IsReq & Paragraph Style are empty. \n"
+print "Finished. \n"
