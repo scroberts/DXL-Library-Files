@@ -1,0 +1,104 @@
+/* Remove Links to Baselines    */
+/* 
+ Remove Links to Baseline Modules - for TMT
+ 
+ Version:	v1
+
+ Description: 	The purpose of this script is to remove links from the current module to any baseline
+		module.  This was needed when we noticed that (for unknown reasons) the SUM DRD module
+		had acquired links from every object to itself in a previous baseline.
+		 
+ Process:	The script performs these steps:
+		1) Steps through the objects in the current module
+		2) Loops over all the outlinks from each object, to any module
+			- the "all" flag is used to include "versioned links"
+		3) If an outlink goes to a baselined module, then that link is deleted
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The user must have the DRD module open with edit access.
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+		4) the DXL output window will display summary count information
+
+*/
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+
+if (!isEdit current)
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+
+//=======================================================================================================
+// Initialize some variables
+
+Object o 
+int CountBaselineLinks = 0
+int CountDeletedLinks = 0
+int count = 0
+Link outLink
+ModuleVersion tgtModVer
+string tgtModVerName
+string tgtfullname
+string tgtver
+
+
+//=======================================================================================================
+// Step through the objects in the DRD, find objects where Object Text begins with AD or RD.
+
+print "Looping over objects...  \n"
+for o in m do {
+
+//debug   print "New Object ++++++++++++++++++++++++++++++++++++++++++ \n"
+
+   count = 0				// reset count of baseline links from this obj
+   for outLink in all o -> "*" do 	// loop over all outlinks from this obj
+   {
+
+//debug      print "New Link ======================= \n"
+
+      tgtModVer = targetVersion(outLink)		// get the ModuleVersion of this outlink
+
+//debug      tgtModVerName = name(tgtModVer)
+//debug      print "tgtModVerName = " tgtModVerName " \n"
+//debug      tgtfullname = fullName(tgtModVer)
+//debug      print "tgtfullname = " tgtfullname " \n"
+//debug      tgtver = versionString(tgtModVer)
+//debug      print "tgtver = " tgtver " \n"
+
+
+      if (isBaseline(tgtModVer)) 		// is this target module a baselined module
+      {
+//debug         print "      this target module is a baseline. \n"
+         delete outLink
+         count++
+         CountBaselineLinks++
+      }
+
+   }
+
+
+   if (count > 0) { flushDeletions }	// flush intentionally done outside of above loop
+
+
+}		// end loop over objects in the DRD
+
+//=======================================================================================================
+// Print final output summary
+
+print CountBaselineLinks " links to baselines were found and deleted. \n"
+print "Finished \n"
+

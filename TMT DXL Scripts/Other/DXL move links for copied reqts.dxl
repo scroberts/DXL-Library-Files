@@ -1,0 +1,198 @@
+/* 
+ Copy links from a list of objects in OPSRD to their copies in OAD - for TMT
+ February 2016
+
+ Description: 	The purpose of this script is to move some links to/from objects in OPSRD to objects in OAD.
+		The script is used after a set of objects had been copied from OPSRD to OAD.  Then their
+		links needed to be copied.  The original objects in OPSRD will be deleted, so their links
+		will also need to be deleted.  
+		 
+ Process:	The script performs these steps:
+		1) Steps through the object IDs given in the OPSRDidLIST array
+			- Assumes that the OPSRD is open and is the current module
+			- Gets the ID of the object copy in the OAD module from OADidLIST
+		2) For each object, do this if there are any out-links
+			- create the same out-link from the copy obj in OAD to the target obj
+			- delete the link from this OPSRD obj to the target obj
+		3) For each object, do this if there are any in-links
+			- create the same in-link from the source obj to the obj copy in OAD
+			- delete the link from the source obj to this obj in OPSRD
+
+ Before Use:	Before running the script, perform these steps:
+		1) Set the ID values in the dxl code for the OPSRDidLIST and OADidLIST arrays
+		2) You MUST open all modules exclusive edit that source links to be edited
+		3) You MUST open all modules read-only that are link destinations
+		4) do not open OPSRD or OAD - this script opens those modules
+
+*/
+
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+//=======================================================================================
+// Define the arrays of DOORS IDs that will be operated on.
+
+ int OPSRDidLIST[] = {658, 715, 718, 659, 716,719, 660, 717, 720, 724, 721, 725, //-
+			722, 726, 723, 727, 661, 728, 733, 732, 730, 734, 731, 662, //-
+			665, 634, 664, 844, 448, 132, 527, 158, 528, 457, 529, //-
+			179, 180, 535, 274, 275, 276, 480, 443, 119}
+
+ int OADidLIST[] = {18788, 18789, 18790, 18791, 18792, 18793, 18794, 18795, 18796, //-
+			18797, 18798, 18799, 18800, 18801, 18802, 18803, 18804, //-
+			18805, 18806, 18807, 18808, 18809, 18810, 18811, 18812, //-
+			18813, 18814, 18815, 18816, 18817, 18818, 18819, 18821, //-
+			18822, 18823, 18824, 18825, 18826, 18827, 18828, 18829, //-
+			18830, 18831, 18832}
+
+
+//me int OPSRDidLIST[] = {439}
+
+//me int OADidLIST[] = {18820}
+
+
+int listsize = sizeof OPSRDidLIST
+
+
+//=======================================================================================
+// Define the OAD and OPSRD modules
+
+string OPSRD_Module 	= "/TMT Requirements/Level 1 Requirements/OPSRD"
+string OAD_Module 	= "/TMT Requirements/Level 1 Requirements/OAD"
+
+print "Opening the OPSRD and OAD modules...  \n"
+
+Module mOPSRD = edit(OPSRD_Module, true)
+if (null mOPSRD)
+{
+   ack "The OPSRD module did NOT open!  Aborting."
+   halt
+}
+Module mOAD = edit(OAD_Module, true)
+if (null mOAD)
+{
+   ack "The OAD module did NOT open!  Aborting."
+   halt
+}
+
+
+// Initialize variables
+
+Object o 
+Object oOPSRD
+Object oOAD
+string s = ""
+string newtext = ""
+int i
+
+int OPSRDid
+int OADid
+
+Link outLink
+ModName_ targetMod
+Object targetObj
+string targetModName
+
+Link inLink
+ModName_ sourceMod
+Object sourceObj
+string sourceModName
+
+int UpdateCount = 0
+int DeletedOutLinks = 0
+int DeletedInLinks = 0
+int CreatedOutLinks = 0
+int CreatedInLinks = 0
+
+
+
+//=======================================================================================
+//=======================================================================================
+// TEST PROCEDURE - incremental to ensure no damage to the modules
+//
+// done 1. test the loop and the ID arrays: comment out loop internals, run on partial array
+// done 2. uncomment the oOPSRD = and oOAD = lines, run again
+// done 3. add in the loop over outlinks, but no creating or deleting
+// done 4. add in the loop over inlinks, but no creating or deleting
+// done 5. add link creating: use an ID array with 1 object in it 
+// done 6. add link deletion: use an ID array with 1 object in it
+//	tested on OPSRD 439 - so this was then removed from the ID list
+
+
+//=======================================================================================
+// Step through the objects, find those with in-links or out-links
+
+
+print "Looping over objects in the OPSRD ID list...  \n"
+
+for (i=0; i < listsize; i++)
+{
+   OPSRDid = OPSRDidLIST[i]
+   OADid = OADidLIST[i]
+   print "Processing OPSRD ID: " OPSRDid "     copy in OAD is: " OADid " \n"
+
+
+   oOPSRD = gotoObject(OPSRDid, mOPSRD)		// Get the object in OPSRD with this ID
+
+   oOAD = gotoObject(OADid, mOAD)		// Get the object in OAD with this ID
+
+
+//=======================================================================================
+// Look for any outgoing links from this object.
+
+   for outLink in oOPSRD -> "*" do {
+
+      targetModName = target outLink	// get the target module name string
+      targetMod = target outLink	// get the target module ref
+      targetObj = target outLink	// get the target object number
+      print "   has outlink to " targetModName " \n"
+
+// Create a link from the OAD copy to this same target object
+
+      oOAD -> targetObj
+      CreatedOutLinks++
+
+
+// Delete this link
+
+      delete outLink
+      DeletedOutLinks++
+
+   }
+   flushDeletions		// deletes don't happen until script ends or this command
+
+
+//=======================================================================================
+// Look for any incoming links to this object.
+
+   for inLink in oOPSRD <- "*" do {
+
+      sourceModName = source inLink		// get the source module name string
+      sourceMod = source inLink			// get the source module ref
+      sourceObj = source inLink			// get the source object number
+      print "   has inlink from " sourceModName " \n"
+
+// Create a link from this source obj to the OAD copy
+
+      sourceObj -> oOAD
+      CreatedInLinks++
+
+
+// Delete this inlink
+
+      delete inLink
+      DeletedInLinks++
+
+   }
+   flushDeletions
+
+
+}	// end of loop over DOORS IDs
+
+
+
+
+print DeletedOutLinks " out-links were deleted. \n"
+print DeletedInLinks " in-links were deleted. \n"
+print CreatedOutLinks " out-links were created. \n"
+print CreatedInLinks " in-links were created. \n"
+print "Finished \n"

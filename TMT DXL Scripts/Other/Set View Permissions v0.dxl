@@ -1,0 +1,86 @@
+/* 
+ Set View Permissions - for TMT
+
+ Description: 	This script changes the edit permissions to the TMT Standard Views in the current module.  
+		The script simply gives the user named "TMT views administrator" full privileges.
+
+ Process:	The script performs these steps:
+		1) loop over the views in the current module
+		2) for each view, loop over the list of standard views to see if this is a standard view
+		3) change the permissions for this view if it matches
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) You must open the module in exclusive edit mode
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+
+*/
+
+
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+string mod_name = name(m)
+
+
+if (!isEdit current)
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+
+Permission P_rmcda = read|create|modify|delete|control
+
+
+int count = 0
+int i
+string viewName
+string StdViews[] = {	"TMT CR Preview",  //-
+			"TMT CR Redline", //-
+			"TMT CR View", //-
+			"TMT Compliance View", //-
+			"TMT Doc Release View", //-
+			"TMT Standard View", //-
+			"TMT Traceability View", //-
+			"TMT V&V View", //-
+			"TMT VCRM View"}
+
+int svsize = sizeof StdViews
+
+for viewName in views m do {
+
+   print "Found view named " viewName " \n"
+   View viewHandle = view(viewName)
+
+   ViewDef vdef = get(viewHandle)
+
+   for (i=0; i < svsize; i++)
+   {
+      string view_to_change = StdViews[i]
+
+      if (viewName == view_to_change)
+      {
+         err = set(viewHandle,P_rmcda,"TMT views administrator")
+         if (!null err) errorBox(err)
+
+         save(viewHandle, vdef)
+         print "This view was updated. \n"
+
+         count++
+         break			// jump out of this loop over views
+      }
+   }				// end of loop over std views
+}
+
+
+
+print count " views were updated. \n"
+print "Finished \n"

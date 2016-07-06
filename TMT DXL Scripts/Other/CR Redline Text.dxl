@@ -1,0 +1,52 @@
+/* 
+ Display CR Redline Text - for TMT
+ By Frank Dekens - March 2015
+
+ Description: 	This Layout DXL script displays redlined changes between the Obejct Text and CR Text.  
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Insert / Column...
+		3) click the "Layout DXL" option, then click the Browse... button.
+		4) in the Browse DXL dialog, click the "New" button.
+		5) paste this script code into the Edit Layout DXL dialog window and click "OK"
+
+*/
+
+
+Buffer a = create()
+Buffer b = create()
+
+a = probeAttr_(obj, "Object Text")
+b = probeAttr_(obj, "CR Text")
+
+int c = 0; // start with 0 and start counting (c)
+int i = 0; // string index (i) it to track where we are in the string
+
+if ( length(b) != 0) // skip if CR text is empty
+{
+   if ( length(a) > 10000 || length(b) > 10000 )  // complain if it's too long
+   {
+       displayRich "{\\i (Text too big to compare.)}"
+   } else
+   {
+       Buffer buff1 = create
+       diff(buff1, a, b, "\\cf1\\strike ", "\\cf3\\ul ")
+
+       c=0; i=0; // reset counter and index
+       // Count number of red-lines so that if there are too many, just replace with single replacement string
+       while( contains( buff1, "\\cf1\\strike ", i) > 0)
+       {
+         i = contains( buff1, "\\cf1\\strike ", i)
+         c++;
+       }
+
+       if ( c > 3 ) // change this if you want to modify at which point you switch between alternating red/blue
+       { //              vs. the entire before in red and new in blue.
+       string ct = "{\\rtf1{\\colortbl;\\red255\\green0\\blue0;\\red0\\green255\\blue0;\\red0\\green0\\blue255;}" // color table
+       buff1 = ct "{\\cf1\\strike " a  "} \n {\\cf3\\ul " b "} " // replace with single red strike through for old
+       // and blue underline for new
+       }
+
+       displayRichWithColour (buff1 "")
+   }
+}

@@ -1,0 +1,58 @@
+﻿ // List non-system attributes and a little info about them 
+/* lists non-system attributes defined for objects */
+
+bool isEnum (string attrname) {
+  AttrDef tmpad = find(current Module, attrname)
+  if (null tmpad) return false
+  string tmpats = tmpad.typeName
+  // this sucks.  what if they come up with some other type?
+  if (tmpats == "String" || tmpats == "Text") return false
+  if (tmpats == "Integer" || tmpats == "Real") return false
+  if (tmpats == "Date") return false
+  AttrType tmpat = find(current Module, tmpats)
+  if (null tmpat) return false
+  int size = tmpat.size
+  if (size > 0) return true
+  return false
+}
+
+
+pragma runLim,0
+Module mod = current Module
+if (null mod)
+{
+  ack "No module is open!"
+  halt
+}
+
+print "Only user-defined object-level attributes are checked\n"
+print "To be empty, an attribute must be completely empty; whitespace is considered non-empty.\n"
+print "\n"
+
+print "Module = " mod."Name" "\n"
+
+
+Object obj
+AttrDef ad
+// Is this loop nesting too slow?
+int count = 0
+for ad in mod do 
+{
+  if (ad.object && !ad.system)
+  {
+    string attrname = ad.name
+    bool allAreEmpty = true
+    for obj in entire mod do
+    {
+      if (isDeleted (obj)) continue
+      string sattr = obj.attrname
+      if (sattr != "") 
+      {
+        allAreEmpty = false
+        break
+      }
+    }
+    if (allAreEmpty) print "  Attribute '" attrname "' is empty\n"
+  }
+}
+

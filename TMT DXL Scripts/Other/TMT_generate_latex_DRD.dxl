@@ -1,0 +1,91 @@
+/* Generate a LaTeX DRD
+
+   Instructions:
+   1) open the module from which to generate a DRD
+   2) run this script
+   3) pdflatex the output file
+
+Stuff to still work on:
+- convert links so they show up right
+- convert lists so they show up right
+- figure out how to handle OLEs and images
+- figure out how to handle tables
+
+*/
+
+/* The following string defines the output file. If it can't be written too, the script will fail. */
+string filename = "Y:\\TMT\\syseng\\Requirements\\dxl_scripts\\TMT_DRD_sample.tex"
+
+string IncludeIntro = "yes" // (change to no to skip chapters 1 and 2)
+// string IncludeIntro = "no"
+
+
+Module m = current
+Object o
+
+
+// ****************
+// * main program *
+// ****************
+
+// Open the current project
+Project p = current Project
+if (null p) {
+  ack "No project is open"
+  halt
+}
+print "Project " (name p) "\n"
+
+// Check we can write to the output file
+output = write filename
+if (null output) { 
+  ack "UH OH, can't write to file " filename "!"
+  halt
+}
+print "Prepared output file " filename "\n"
+
+// output the LaTex header:
+output << "\\newcommand{\\texfilename}{TMT\\_APS\\_DRD}\n"
+output << "\\title{Alignment and Phasing System: Design Requirements Document}\n"
+output << "\\newcommand{\\headertitle}{TMT-APS: Design Requirements Document}\n"
+output << "\\author{Frank G. Dekens}\n"
+output << "\\newcommand{\\memodate}{Jan. 08, 2014}\n"
+output << "\\newcommand{\\memoversion}{1.0}\n"
+output << "\\newcommand{\\TMTrefno}{TMT.IAO.DRD.14.001.DRF01}\n"
+
+output << "\\input{memo_header}\n"
+
+
+// Prep for loop
+// string copiedID = "TMT ID"  // Name of destination attribute
+string id = "" 
+
+// Now loop through the objects
+for o in current Module do {
+  if (isDeleted(o)) continue
+
+  // If the intro should not be included, then don't include anything before section 3
+  if (number(o) < "3" && IncludeIntro == "no" ) continue
+
+  string objtext = o."Object Text"
+  if (!isOutline(o)) {
+    if (objtext != null){
+      id = identifier(o)   
+      // just output the idendifier for now, since that is what I have
+      output << "[" id "] " objtext "\n\n"
+ 
+     string discussion = o."Discussion"
+      if (discussion != null)
+        output << "\\textit{ Discussion:" discussion "}\n\n"
+    }
+  }
+  else {
+  output << "\\section{ " o."Object Heading" "}\n\n"
+  }
+
+}
+
+// close out the LaTeX file
+output << "\\end{document}"
+print "Finished writing LaTeX file: " filename "\n"
+

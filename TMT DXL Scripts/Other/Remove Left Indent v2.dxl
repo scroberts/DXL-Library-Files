@@ -1,0 +1,68 @@
+/* 
+ Remove Left Indent - for TMT
+ By Michael Evans - Nov 2014
+
+ Description: 	This script removes the left indentation of text in the Object Text field.  
+		This undesirable indentation is the result of importing requirements from a MS Word file.
+
+ Method:	The script uses the built-in DXL function: applyTextFormattingToParagraph
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+
+ Before Use:	To be safe, it is recommended that the following steps be taken BEFORE using the script.
+		1) scan the module looking for objects that contain indentation you want to retain
+			- some authors include numbered lists or other subordinated content that has a left indent
+			- these are easy to spot
+		2) make a note of these so you can undo what the script does
+			- an easy method is to grab a screen capture to record the original format of each
+		3) run the script
+		4) do NOT save the changes yet
+		5) scan the module, inspecting all changed objects (they have red side-bars)
+			- look for anything that the script might have messed up
+			- if problems are found, then consider not saving the changes and trying another method
+		6) inspect each item that you saved in step (2) above
+			- edit each object so the original formatting is returned
+			- this is often easy: highlight the text to be indented and select "demote" in the toolbar
+		7) only after you are satisfied, then save the changes
+*/
+
+Object o 
+string s = ""
+RichTextParagraph rp
+int objCount = 0
+int editCount = 0
+int oleCount = 0
+int bulletCount = 0
+
+for o in current Module do {  				// for each object in the module
+
+   s = richText o."Object Text"
+   objCount++
+   
+   for rp in s do {					// for each rtf paragraph seen in the object
+
+      if ( rp.indentLevel > 0 ) {			// if it has any indentation, then reset indent to 0
+
+         if ( containsOle(o."Object Text") ) {		// ignore paragraphs that contain OLE objects
+            oleCount++
+         }
+         else {
+            if ( rp.isBullet ) {			// ignore paragraphs that contain DOORS bullets
+               bulletCount++
+            }
+            else {
+               o."Object Text" = richText(applyTextFormattingToParagraph(s,false,0,0))
+               editCount++
+            }
+         }
+      }
+   }
+}
+
+print "Number of objects examined: " objCount "\n"
+print "Number of paragraphs edited: " editCount "\n"
+print "Number of rtf paragraphs containing OLEs: " oleCount "\n"
+print "Number of rtf paragraphs containing bullets: " bulletCount "\n"
+print "Finished \n"
