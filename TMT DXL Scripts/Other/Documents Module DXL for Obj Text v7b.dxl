@@ -1,0 +1,90 @@
+/* 
+Documents Module OR Script - for TMT
+By Michael Evans - July 2015
+
+Description: 	This is a DXL script for use in populating the Object Text attribute in the Documents module.
+		This script populates the Object Text column with the contents of one of these:
+		a) the dccDocTitle, if that is available  (this is the preferred content to use)
+		b) the DocumentTitle, if dccDocTitle is empty and DocumentTitle is not empty
+		c) nothing, if this object has a non-blank header text
+		d) a dummy string, if none of the above conditions are met
+			this is a document that currently lacks a title
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The user has opened the Documents module in exclusive edit mode.
+		
+ Directions:	1) Open the Documents module in exclusive edit mode
+		2) In that module window, select menu item: Tools / Edit DXL...
+		3) Paste this script code into the dialog window and click "Run"
+
+ Notes:		1) The script does not save the module, the user should review the changes and save the module if satisfied.
+
+*/
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+Object o 
+
+string dccDocTitle
+string DocumentTitle
+string dccDocNo
+string DocOwner
+string onumber
+string HeaderText
+
+
+
+for o in m do {					// Step through the objects in this module
+
+
+   dccDocTitle 		= o."dccDocTitle"
+   DocumentTitle 	= o."DocumentTitle"
+   dccDocNo 		= o."dccDocNo"
+   DocOwner 		= o."DocOwner"
+   onumber		= number(o)
+   HeaderText		= o."Object Heading"
+
+
+   if ( null dccDocTitle ) 			// if dccDocTitle is empty, then use DocumentTitle if that is not empty
+   {
+
+      if ( null DocumentTitle )			// if DocumentTitle is also empty, then this still might be a document - must check
+      {
+        // if ( null dccDocNo && null DocOwner )	// if dccDocNo and DocOwner are both empty, then this is likely a header
+         if ( !null HeaderText )
+         {		             
+            // do nothing with this object - it is a header
+
+         } else					// it's not a header, just doesn't have a title yet
+         {
+
+            o."Object Text" = "[Document currently untitled]"
+
+         }
+
+      } else					// DocumentTitle is not empty, so use it
+      {
+         o."Object Text" = DocumentTitle
+      }
+
+   } else					// dccDocTitle is not empty, then use it since it is preferred
+   {
+
+      o."Object Text" = dccDocTitle
+
+   }
+
+
+}	// end of loop over objects in the module

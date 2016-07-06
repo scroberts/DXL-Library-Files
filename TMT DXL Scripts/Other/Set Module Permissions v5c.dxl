@@ -1,0 +1,487 @@
+/* 
+ Set Module Permissions - for TMT
+ By Michael Evans - March 2015
+
+ Description: 	This script changes the access permissions in the current module.  
+		TMT Project employs the following permission scheme:
+ 			a) anybody can create, modify or delete proposed requirements in the last section
+			b) anybody can modify the fields: "CR Text", "Rationale" and Misc Ref Docs in any section
+		This script does NOTHING with non-TMT-Standard attributes.
+		This script will set the module owner group access settings, if that user group exists.
+
+
+ Method:	The script uses the built-in DXL functions: 
+			Attribute Access: setVal & setDef
+			Module Access: set
+
+ Process:	The script performs these steps:
+		1) setup module access permissions
+		2) setup section/object access permissions
+		3) setup attribute access permissions (for both Value and Definition)
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The last section (level 1) has a header "Proposed New Requirements"
+			This is how the script identifies the section to grant write access to all.
+			If the last section does not begin with this text, a warning is issued and no changes are made.
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+
+*/
+
+
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+string mod_name = name(m)
+
+
+if (!isEdit current)
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+
+
+string ModuleOwnerGroup = mod_name "-Owner"
+print "Variable ModuleOwnerGroup = " ModuleOwnerGroup " \n"
+
+if (!existsGroup(ModuleOwnerGroup))		// check if this user group does not exist
+{
+   ModuleOwnerGroup = "NONE"			// the module owner group does not exist, so set flag
+   print "Module owner group does not exist. \n"
+   print "Skipping ModuleOwnerGroup access settings. \n"
+}
+
+
+
+Permission P_r     = read
+Permission P_rm    = read|modify
+Permission P_rmc   = read|modify|create
+Permission P_rmcd  = read|create|modify|delete
+Permission P_rmcda = read|create|modify|delete|control
+
+AccessRec ar = null
+
+AttrDef ad
+
+
+Object o 
+string s = ""
+int i
+
+int AttributeCount = 0
+int NonSysAttrCount = 0
+int editCount = 0
+
+
+// Scan the attributes to report some counts.
+
+for ad in m do {  				// for each attribute definition in the module
+
+   AttributeCount++
+   string attrname = ad.name
+
+   if (ad.object && !ad.system)
+   {
+      NonSysAttrCount++
+   }
+}
+
+print "Module: " m."Name" "\n"
+print "Number of attributes found: " AttributeCount "\n"
+print "Number of non-system attributes found: " NonSysAttrCount "\n"
+
+
+
+// =======================================================================================
+// Set the Module access permissions.
+//
+//	Systems Engineering	RMCDA
+//	JPL-Write		RMCDA
+//	[module]-Owner		RMC
+//	Everyone else		RMC
+// =======================================================================================
+
+
+print "Begin processing Module permissions...  \n"
+
+
+   err = set(m,P_rmcda,"Systems Engineering")
+   if (!null err) errorBox(err)
+
+   err = set(m,P_rmcda,"JPL-Write")
+   if (!null err) errorBox(err)
+
+   if (ModuleOwnerGroup != "NONE")
+   {
+      err = set(m,P_rmc,ModuleOwnerGroup)
+      if (!null err) errorBox(err)
+   }
+
+   err = set(m,P_rmc,"JPL")
+   if (!null err) errorBox(err)
+
+   err = set(m,P_rmc,"")				// set the default to read-only
+   if (!null err) errorBox(err)
+
+
+
+
+// =======================================================================================
+// Set the Section / Object access permissions - for the headers.  
+// Child objects inherit from these.
+//
+//	Systems Engineering	RMCDA
+//	JPL-Write		RMCDA
+//	[module]-Owner		RMCD
+//	Everyone else		RM
+// =======================================================================================
+
+print "Begin processing Section/Object headers...  \n"
+
+
+string header_text = null
+string last_header = null
+int obj_level
+
+
+// Step through the objects, find headings and change the access settings on those objects.
+
+for o in m do {
+
+   obj_level = level(o)
+
+   if (obj_level == 1) then 			// this is a Level 1 header object
+   {
+      last_header = o."Object Heading"		// save the header text
+
+      specific(o)				// disable inherit access from parent
+
+
+// First set the default to RMCDA (this is temporary so the script doesn't erase its own access)
+      err = set(o,P_rmcda,"")
+      if (!null err) errorBox(err)
+
+// Now use dxl function unsetAll to clear all access for this attribute (temporarily)
+      err = unsetAll(o)
+      if (!null err) errorBox(err)
+
+
+      err = set(o,P_rmcda,"Systems Engineering")
+      if (!null err) errorBox(err)
+
+      err = set(o,P_rmcda,"JPL-Write")
+      if (!null err) errorBox(err)
+
+      if (ModuleOwnerGroup != "NONE")
+      {
+         err = set(o,P_rmcd,ModuleOwnerGroup)
+         if (!null err) errorBox(err)
+      }
+
+      err = set(o,P_rm,"JPL")
+      if (!null err) errorBox(err)
+
+      err = set(o,P_rm,"")			// set the default to read only
+      if (!null err) errorBox(err)
+      
+   } else					// this is not an L1 header
+   {						//	so it's a requirement or discussion or lower header
+
+      inherited(o)				//	set the object to inherit access from the parent
+
+   }
+}
+
+
+
+
+// =======================================================================================
+// Set the Section 6 access permissions so anybody can edit/create in Section 6.
+// The last section is open for anybody to add new candidate requirements.  However some
+// TMT modules have more than 6 sections.  So the last section is examined to see if it
+// begins with the text "Temporary".  If so, then this is assumed to be the right section.
+//
+//	Systems Engineering	RMCDA
+//	JPL-Write		RMCDA
+//	[module]-Owner		RMCD
+//	Everyone else		RMCD
+// =======================================================================================
+
+print "Set access for the last section...  \n"
+
+
+// Get the last header text, to see if it is the temporary items section
+
+for o in m do {
+
+   header_text = o."Object Heading"
+
+   if (header_text == last_header)
+   {
+
+      print "The last section header is: " header_text " \n"
+
+      if (header_text == "Proposed New Requirements")	// the last section header is "Proposed New Requirements"
+
+      {						// so therefore we assume this is the public-writable drop-box section
+
+         print "The last section header is the TEMPORARY section! \n"
+
+
+// First set the default to RMCDA (this is temporary so the script doesn't erase its own access)
+         err = set(o,P_rmcda,"")
+         if (!null err) errorBox(err)
+
+// Now use dxl function unsetAll to clear all access for this attribute (temporarily)
+         err = unsetAll(o)
+         if (!null err) errorBox(err)
+
+
+         err = set(o,P_rmcda,"Systems Engineering")
+         if (!null err) errorBox(err)
+
+         err = set(o,P_rmcda,"JPL-Write")
+         if (!null err) errorBox(err)
+
+         if (ModuleOwnerGroup != "NONE")
+         {
+            err = set(o,P_rmcd,ModuleOwnerGroup)
+            if (!null err) errorBox(err)
+         }
+
+         err = set(o,P_rmcd,"JPL")
+         if (!null err) errorBox(err)
+
+         err = set(o,P_rmcd,"")		// set the default to read + modify + create + delete
+         if (!null err) errorBox(err)
+
+
+      } else
+      {
+         ack "The last section is not named Proposed New Requirements. No create/delete access will be granted."
+      }
+
+   }
+}
+
+
+
+
+// =======================================================================================
+// Set the attributes "CR Text", "CR ID", "Rationale" and "Miscellaneous Reference Documents" 
+// so anybody can modify them.
+//
+//	Systems Engineering	RMCDA
+//	JPL-Write		RMCDA
+//	[module]-Owner		RM (value)	R (definition)
+//	Everyone else		RM (value)	R (definition)
+// =======================================================================================
+
+print "Begin processing TMT Open Attributes...  \n"
+
+string OPENattrs[] = {"CR Text", "CR ID", "Rationale", "Miscellaneous Reference Documents"}
+
+for (i=0; i < 4; i++)
+{
+   attrname = OPENattrs[i]
+   print "    processing: " attrname " \n"
+
+   ad = find(m,attrname)
+   if (null ad) then
+   {
+      ack "Attribute: " attrname " was not found"
+   } else
+   {
+      print attrname " was found - setting access now \n"
+
+// Disable inheritance for this attribute
+
+      err = specificVal(m,ad)
+      if (!null err) errorBox(err)
+
+
+// Attribute VALUE settings ===========================================================================
+
+// First set the default to RMCDA (this is temporary so the script doesn't erase its own access)
+      err = setVal(m,ad,P_rmcda,"")
+      if (!null err) errorBox(err)
+
+// Now use dxl function unsetAllVal to clear all access for this attribute (temporarily)
+      err = unsetAllVal(m,ad)
+      if (!null err) errorBox(err)
+
+
+      err = setVal(m,ad,P_rmcda,"Systems Engineering")
+      if (!null err) errorBox(err)
+
+      err = setVal(m,ad,P_rmcda,"JPL-Write")
+      if (!null err) errorBox(err)
+
+      if (ModuleOwnerGroup != "NONE")
+      {
+         err = setVal(m,ad,P_rm,ModuleOwnerGroup)
+         if (!null err) errorBox(err)
+      }
+
+      err = setVal(m,ad,P_rm,"JPL")
+      if (!null err) errorBox(err)
+
+      err = setVal(m,ad,P_rm,"")		// set the default to read & modify
+      if (!null err) errorBox(err)
+
+
+// Attribute DEFINITION settings ======================================================================
+
+// First set the default to RMCDA (this is temporary so the script doesn't erase its own access)
+      err = setDef(m,ad,P_rmcda,"")
+      if (!null err) errorBox(err)
+
+// Now use dxl function unsetAllDef to clear all access for this attribute (temporarily)
+      err = unsetAllDef(m,ad)
+      if (!null err) errorBox(err)
+
+
+      err = setDef(m,ad,P_rmcda,"Systems Engineering")
+      if (!null err) errorBox(err)
+
+      err = setDef(m,ad,P_rmcda,"JPL-Write")
+      if (!null err) errorBox(err)
+
+      if (ModuleOwnerGroup != "NONE")
+      {
+         err = setDef(m,ad,P_r,ModuleOwnerGroup)
+         if (!null err) errorBox(err)
+      }
+
+      err = setDef(m,ad,P_r,"JPL")
+      if (!null err) errorBox(err)
+
+      err = setDef(m,ad,P_r,"")		// set the default to read-only for attribute definitions
+      if (!null err) errorBox(err)
+
+   }
+
+}
+
+
+
+// =======================================================================================
+// Set the TMT Standard fields so only priviliged groups and module owners can modify.
+//
+//	Systems Engineering	RMCDA
+//	JPL-Write		RMCDA
+//	[module]-Owner		RM (value)	R (definition)
+//	Everyone else		R (value)	R (definition)
+//
+// The complete list of TMT standard attributes is given in: 
+//	"Requirements Management Procedure Document", TMT.SEN.TEC.13.040
+// =======================================================================================
+
+print "Begin processing TMT Standard Attributes...  \n"
+
+
+string TMTattrs[] = {"TMT ID", "Applicable Subsystems", "Architecture", "IsReq", //-
+	"Modified at Release", "Key", "Driving", //-
+	"CR State", "CR History", "Acceptance State", "Compliance State", "Compliance Notes", //-
+	"Expected Compliance Reference", "SE Notes", "Owner", "Waiver", "All VAs Completed", //-
+	"Overall Verification Description", "Overall Verification State", "VA Links", //-
+	"VCRM Agreement Status", "Paragraph Style", "CR History", "Linked to OAD Requirements",  //-
+	"Linked to OCD Requirements", "Linked to OPSRD Requirements", "Linked to ORD Requirements", //-
+	"Name", "Object Heading", "Object Text", "Object Short Text"}
+
+int tasize = sizeof TMTattrs
+//debug    print "TMTattrs array size (tasize) = " tasize " \n"
+
+for (i=0; i < tasize; i++)
+{
+   attrname = TMTattrs[i]
+   print "    processing: " attrname " \n"
+
+   ad = find(m,attrname)
+   if (null ad) then
+   {
+      ack "Attribute: " attrname " was not found"
+   } else
+   {
+      print attrname " was found - setting access now \n"
+
+// Disable inheritance for this attribute
+
+      err = specificVal(m,ad)
+      if (!null err) errorBox(err)
+
+
+// Attribute VALUE settings ===========================================================================
+// First set the default to RMCDA (this is temporary so the script doesn't erase its own access)
+      err = setVal(m,ad,P_rmcda,"")
+      if (!null err) errorBox(err)
+
+// Now use dxl function unsetAllVal to clear all access for this attribute (temporarily)
+      err = unsetAllVal(m,ad)
+      if (!null err) errorBox(err)
+
+
+      err = setVal(m,ad,P_rmcda,"Systems Engineering")
+      if (!null err) errorBox(err)
+
+      err = setVal(m,ad,P_rmcda,"JPL-Write")
+      if (!null err) errorBox(err)
+
+      if (ModuleOwnerGroup != "NONE")
+      {
+         err = setVal(m,ad,P_rm,ModuleOwnerGroup)
+         if (!null err) errorBox(err)
+      }
+
+      err = setVal(m,ad,P_r,"JPL")
+      if (!null err) errorBox(err)
+
+      err = setVal(m,ad,P_r,"")		// set the default to read only
+      if (!null err) errorBox(err)
+
+
+// Attribute DEFINITION settings ======================================================================
+// First set the default to RMCDA (this is temporary so the script doesn't erase its own access)
+      err = setDef(m,ad,P_rmcda,"")
+      if (!null err) errorBox(err)
+
+// Now use dxl function unsetAllDef to clear all access for this attribute (temporarily)
+      err = unsetAllDef(m,ad)
+      if (!null err) errorBox(err)
+
+
+      err = setDef(m,ad,P_rmcda,"Systems Engineering")
+      if (!null err) errorBox(err)
+
+      err = setDef(m,ad,P_rmcda,"JPL-Write")
+      if (!null err) errorBox(err)
+
+      if (ModuleOwnerGroup != "NONE")
+      {
+         err = setDef(m,ad,P_r,ModuleOwnerGroup)
+         if (!null err) errorBox(err)
+      }
+
+      err = setDef(m,ad,P_r,"JPL")
+      if (!null err) errorBox(err)
+
+      err = setDef(m,ad,P_r,"")		// set the default to read-only
+      if (!null err) errorBox(err)
+
+   }
+
+}
+
+
+
+
+print "Finished \n"
