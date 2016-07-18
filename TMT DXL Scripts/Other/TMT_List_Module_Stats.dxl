@@ -1,0 +1,440 @@
+/* This DXL script lists modules and statistics about requirements in open project.  In performs it's statistics on Sections 3
+and up.  This is a modified version from Jim Grimes origional, and was first adopted for SIM and now for TMT.
+
+For each Formal Module in the open project, the script lists a bunch of statistics. This is constantly chaning, but the lists
+includes stuff like:: Name, date last modified, object count, count of text objects, count of objects with "shall" in object
+text, count of table cells, count of TBRs, count of TBDs, count of parent links (up/out), count of child links (down/in), and
+count of internal links.
+
+Note that because of the way DXL works, the functions are first defined, and then the main functions comes towards the
+end. Since it's a scripting language, variables are defined along the way.
+
+ --- FGD */
+
+
+
+pragma runLim, 0
+
+/* The following string defines the output file. If it can't be written too, the script will fail. */
+string filename = "Y:\\TMT\\syseng\\Requirements\\dxl_scripts\\listModStats.csv"
+
+
+Regexp templateRE = regexp "[tT]emplate"
+Regexp validModuleName = regexp "L*"
+Stream output
+bool dodebug = false
+
+/* finds first instance of "thestring" in the array "strings" */
+int findinstrings (string strings[], int nstrings, string thestring)
+{
+  int i
+  for (i = 0 ; i < nstrings ; i++) 
+  {
+    if (strings[i] == thestring) return i
+  }
+  return -1
+}
+
+/* Find the first index into string vector of the value of a multi-valued enumerated attribute. Behavior undefined if not
+multi-valued enumeration. Basic use is to see if a multi-valued enumerated attribute has a non-blank value. */
+int findinvalues (string strings[], int nstrings, Object o, string attrname)
+{
+  int i
+  for (i = 0 ; i < nstrings ; i++)
+  {
+    if (isMember(o.attrname, strings[i])) return i
+  }
+  return -1
+}
+
+int countMatches (Regexp r, string txt)
+{
+  if (txt == null) return 0
+  int i = 0
+  string txttmp = txt
+  while (!null txttmp && r txttmp) 
+  {
+    i++
+// if (dodebug) output << txttmp[match 0] "  "
+    txttmp = txttmp[end 0 + 1:] // move past last match
+// if (dodebug) output << txttmp "\n"
+  }
+  return i
+}
+
+bool isLegitTableCell (Object obj, string txt)
+{
+  if (!cell(obj)) return false
+  if (txt == null) return false
+  if (txt == "") return false
+  if ((cistrcmp(txt, "NA") == 0) || (cistrcmp(txt, "n/a") == 0)) return false
+  return true
+}
+
+Regexp shall = regexp "(SHALL|Shall|shall)"
+Regexp tbr = regexp "(TBR|tbr)"
+Regexp tbd = regexp "(TBD|tbd)"
+
+// routine doModule - gather together common actions on each module.
+string doModule (Module mod)
+{
+  ModName_ modname
+  string smname
+  Link aLink
+  string returnval
+
+  if (null mod) { 
+    print "*** Got null module for " fullName(mod) " *** \n" ; 
+    return ""
+  }
+
+  // smname = mod.("Name")
+  smname = fullName(mod)
+
+  // Following line is to filter modules, At JPL, all valid modules start with L*, the rest might be VEMs, VAMs, test, etc.
+  // ignore for now, and fix later... FGD
+  // if (!(validModuleName smname)) return ""
+
+  string modDate = mod.("Last Modified On")
+
+  modname = module (smname)
+  if (null modname)
+  {
+    print "Got modName == nullf for " fullName(mod) "\n" 
+    return ("")
+  }
+
+  if (type(modname) == "Formal")
+  {
+    Object obj
+    Object otherObj
+    Module otherMod
+    int objCount = 0
+    int outLinkCount = 0
+    int inLinkCount = 0
+    int internalLinkCount = 0
+    int nonHeaderCount = 0
+    int shallCount = 0
+    int TBRCount = 0
+    int TBDCount = 0
+    int tableCellCount = 0
+    int shallWithOutLinksCount = 0
+    int shallWithInLinksCount = 0
+    int outlinkToDeletedObjCount = 0
+    int inlinkFromDeletedObjCount = 0
+
+    int saaBlank = 0
+    int saaAcceptYes = 0
+    int saaAcceptNo = 0
+
+    int CanMeetBlank = 0
+    int CanMeetNotAss = 0
+    int CanMeetYes = 0
+    int CanMeetNo = 0
+
+    string saaname = "Accept?"
+    bool hassaa = false
+    string saavalues[] = { "Yes", "No" }
+
+    string cmname = "Can Meet?"
+    bool hascm = false
+    string cmvalues[] = { "Not Assessed", "Yes", "No" }
+
+    string actionname = "Action"
+    int ActionNonBlank = 0
+
+    string verificationname = "Verification Approach"
+    int VerificationBlank = 0
+
+    AttrDef saadef = find (mod, saaname)
+    if (!(null saadef))
+    {
+      if (saadef.multi) hassaa = true
+      else
+      {
+        print "Module " smname "'s " saaname "attribute type is not multi-valued, ignoring. \n"
+      }
+    }
+
+    AttrDef cmdef = find (mod, cmname)
+    if (!(null cmdef))
+    {
+      if (cmdef.multi) hascm = true
+      else
+      {
+        print "Module " smname "'s " cmname "attribute type is not multi-valued, ignoring. \n"
+      }
+    }
+
+    for obj in entire mod do
+    {
+      if (isDeleted(obj)) continue
+
+      string sn = number(obj)
+      // print "doing sn=" sn " of " smname "\n"
+
+      // DO ONLY SECTION 3 ON
+      if (sn < "3") continue
+      // could count numbers of tables with following:
+      // if (table(obj)) ....  true if table header object
+
+      bool hasShall = false
+
+      objCount++ 
+      if (!isOutline(obj)) 
+      {
+        nonHeaderCount++  
+
+        string objtext = obj."Object Text"
+        if (objtext != null)
+        {
+          // We won't count table cells if they are empty or NA or N/A
+          if (isLegitTableCell (obj, objtext)) tableCellCount++
+          if (countMatches (shall, objtext) > 0)
+          {
+            shallCount++ 
+            hasShall = true 
+          }
+          if (countMatches (tbr, objtext) > 0) TBRCount++ 
+          if (countMatches (tbd, objtext) > 0) TBDCount++
+        }
+        
+      }
+
+      // Now look at links
+      bool hasOutLinks = false
+      for aLink in obj->"*" do    // "*" means look in all link modules
+      {
+        otherObj = target aLink  // should never be null, but ...
+        if (null otherObj) print "Uh oh ... otherObj is null"
+        if (null otherObj) continue
+        if (isDeleted(otherObj)) 
+        {
+          outlinkToDeletedObjCount++
+          continue
+        }
+        hasOutLinks = true
+        otherMod = module otherObj
+        if (otherMod != mod) outLinkCount++
+        else internalLinkCount++
+      }
+      if (hasShall && hasOutLinks) shallWithOutLinksCount++
+
+      bool hasInLinks = false
+      for aLink in obj<-"*" do    // "*" means look in all link modules
+      {
+        otherObj = source aLink  // should never be null, but ...
+        if (null otherObj) print "Uh oh ..."
+        if (isDeleted(otherObj))
+        {
+          inlinkFromDeletedObjCount++
+          continue
+        }
+        hasInLinks = true
+        otherMod = module otherObj
+        if (otherMod != mod) inLinkCount++
+        // Don't count internal links twice
+      }
+      if (hasShall && hasInLinks) shallWithInLinksCount++
+
+
+      // now do specific attributes
+      // Statistics on the Accept? attribute
+      if (hasShall && hassaa)
+      {
+        int foundi = findinvalues (saavalues, 2, obj, saaname) // The 2 is the number of possible answers in saname
+        if (foundi == -1) saaBlank++
+        else
+        {
+          if (isMember(obj.saaname, "Yes" )) saaAcceptYes++
+          if (isMember(obj.saaname, "No" )) saaAcceptNo++
+        }
+      }
+
+      // Statistics on the Can Meet? attribute
+      if (hasShall && hascm)
+      {
+        int foundi = findinvalues (cmvalues, 3, obj, cmname) // The 2 is the number of possible answers in saname
+        if (foundi == -1) CanMeetBlank++
+        else
+        {
+          if (isMember(obj.cmname, "Not Assessed" )) CanMeetNotAss++
+          if (isMember(obj.cmname, "Yes" )) CanMeetYes++
+          if (isMember(obj.cmname, "No" )) CanMeetNo++
+        }
+      }
+
+      // Statistics on the Action attribute
+      AttrDef cmdef = find (mod, actionname) // See if there is an Action attribute
+      if (hasShall && !(null cmdef) ) // if it has a shall, and the Action attribute search didn't return null
+      {
+	string actiontext = obj."Action"
+        if (actiontext != null) ActionNonBlank++
+      }
+
+      // Statistics on the Verification Approach attribute
+      AttrDef cmdef2 = find (mod, verificationname) // See if there is an Verification attribute
+      if (hasShall && !(null cmdef2) ) // if it has a shall, and the Action attribute search didn't return null
+      {
+	string verificationtext = obj."Verification Approach"
+        if (verificationtext == null) VerificationBlank++
+      }
+
+
+    }   // end of object loop, no?
+
+    string percentShallsLinkedUpward = "" 
+    string percentShallsLinkedDownward = ""
+    if (shallCount > 0)
+    {
+      real pcup = 100.0 * realOf(shallWithOutLinksCount)/realOf(shallCount)
+      real pcdn = 100.0 * realOf(shallWithInLinksCount)/realOf(shallCount)
+      percentShallsLinkedUpward = pcup "%"
+      percentShallsLinkedDownward = pcdn "%"
+    }
+
+
+//    returnval = smname "\t" modDate "\t" objCount "\t" nonHeaderCount "\t"
+    returnval = smname "\t" modDate "\t" 
+//    returnval = returnval shallCount "\t" tableCellCount "\t" 
+    returnval = returnval shallCount "\t" 
+    returnval = returnval TBRCount "\t" TBDCount "\t"
+//    returnval = returnval outLinkCount "\t" inLinkCount "\t" internalLinkCount "\t"
+//    returnval = returnval shallWithOutLinksCount "\t" percentShallsLinkedUpward "\t"
+    returnval = returnval (shallCount - shallWithOutLinksCount) "\t"
+//    returnval = returnval shallWithInLinksCount "\t" percentShallsLinkedDownward "\t"
+    returnval = returnval (shallCount - shallWithInLinksCount) "\t"
+    returnval = returnval outlinkToDeletedObjCount "\t" inlinkFromDeletedObjCount "\t"
+    returnval = returnval saaBlank                 "\t"
+//    returnval = returnval saaAcceptYes             "\t"
+    returnval = returnval saaAcceptNo              "\t"
+    returnval = returnval CanMeetBlank             "\t"
+    returnval = returnval CanMeetNotAss            "\t"
+//    returnval = returnval CanMeetYes               "\t"
+    returnval = returnval CanMeetNo                "\t"
+    returnval = returnval ActionNonBlank           "\t"
+    returnval = returnval VerificationBlank           ""
+
+  }
+  else { return "" }
+  return returnval
+}
+
+// ****************
+// * main program *
+// ****************
+
+// Open the current project
+Project p = current Project
+if (null p) {
+  ack "No project is open"
+  halt
+}
+print "Project " (name p) "\n"
+
+// Check we can write to the output file
+output = write filename
+if (null output) { 
+  ack "UH OH, can't write to file " filename "!"
+  halt
+}
+print "Prepared output file " filename "\n"
+
+
+// First need a total count of modules to put in sortable array
+// Guess we'll have to open them all too, if that's possible,
+// so that we can accurately count links
+
+Module mod
+ModName_ modname
+// string smname
+
+int modCount = 0 // track the number of formal modules, in which the requirements reside
+
+Item module_i
+
+for module_i in p do {
+  print "Considering opening " fullName(module_i) " of type " (type module_i) ": "
+
+  if( !(validModuleName fullName(module_i) ) ) {
+      print "Skipping because it does not have a valid module name\n"
+      continue
+  }   
+
+  modname = module(fullName(module_i))
+  if ( (type module_i) != "Formal")
+      print "Skipping because it's of type " (type module_i) "\n"
+  else {
+    modCount++
+    if (!open(modname)) {
+      mod = read (fullName(module_i), false)
+      if (null mod) print "Uh oh couldn't open " fullName(module_i) "\n"
+    }
+    else print "Found a valid module\n" 
+  }
+}
+print "Found " modCount " number of valid modules\n"
+
+// Now that we have a count, allocate the array and start calculating the statistic on each module
+string modRecords[modCount]
+
+int modNumber = 0
+
+for mod in p do
+{
+  if (!null mod) {
+    string modRecord = doModule (mod)
+    if (modRecord != "")
+    {
+      modRecords[modNumber] = modRecord
+      modNumber++
+    }
+  }
+}
+
+// Now we have the stastics, so sort the modules:
+sort modRecords
+
+
+// output the header line:
+output << "Formal Module Name\tLast Modified\t"
+//output << "Shall Count\tTable Cell Count\t"
+output << "Shall Count\t"
+output << "TBR Count\tTBD Count\t"
+// output << "Parent Link Count\tChild Link Count\tInternal Link Count\t"
+// output << "# Shalls Linked Upward\t% Shalls Linked Upward\t"
+output << "# Shalls NOT Linked Upward\t"
+// output << "# Shalls Linked Downward\t% Shalls Linked Downward\t"
+output << "# Shalls NOT Linked Downward\t"
+output << "# Links Up to Deleted Object\t# Links Down to Deleted Object\t"
+output << "# Blank Acccept?\t"
+// output << "# Accepted\t"
+output << "# Not Accepted\t"
+output << "# Blank Can Meet?\t"
+output << "# Can Meet Not Assessed\t"
+// output << "# Can Be Met\t"
+output << "# Can NOT Be Met\t"
+output << "# Actions\t"
+output << "# Missing V&V\n"
+
+// output the records:
+for (i = 0 ; i < modCount ; i++) {
+    output << modRecords[i] "\n"
+}
+
+close output
+
+print "Wrote " modCount " records to the output file\n"
+
+string ackstring 
+ackstring = "NOTE: this DXL script leaves ALL formal modules open.\n"
+ackstring = ackstring "They will be properly closed when you exit your session,\n"
+ackstring = ackstring "but not if DOORS crashes."
+ack ackstring
+
+ack "Wrote " modCount " records to \"" filename "\""
+
+// from online: to see list of stuff in project:
+// Item i
+// for i in current Project do
+// 	{ print fullName(i) ": " (type i) "\n"}

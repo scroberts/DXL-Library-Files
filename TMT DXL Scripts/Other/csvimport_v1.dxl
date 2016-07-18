@@ -1,0 +1,239 @@
+// csv import from file.
+
+/* 
+  csv import of excel csv file.  " mark means following is all one field 
+  until end quote. double quote quotes a quote, so it isn't a quote. 
+*/
+
+  /*  some declarations for now...
+  bool pcsf_initfile (string filename)
+  Skip pcsv_coldefs 
+  string[n] pcsv_colnames  // except how do we do this?
+  int pcsv_getncols
+  string pcsv_getcolname(int i)   // needed?
+  bool pcsv_nextrow()
+  string pcsv_getval (string name)
+  string pcsv_getvali (int i)
+  */
+
+void ackAndHalt (string msg)
+{
+  ack msg
+  halt
+}
+          
+void askcontinue(string message)
+{
+  if (!(confirm message "\nContinue?")) halt
+}
+
+int pcsv_ERROR = 0     // what about incomplete field?
+int pcsv_EOFIELD = 1
+int pcsv_EOROW = 2
+int pcsv_EOFILE = 3
+
+string pcsv_filein = ""
+string pcsv_field = ""
+bool pcsv_in_quotes = false
+int pcsv_len = 0
+int pcsv_i = 0
+int pcsv_numcols = 0
+int pcsv_rowno = 0    // next row number or current during pcsv_nextrow()
+Skip pcsv_colnames = create()       // key int colno; val string name
+Skip pcsv_coldefs = createString()  // key string name; val int colno
+Skip pcsv_colvals = createString()
+
+int pcsv_getncols()
+{
+  return pcsv_numcols
+}
+// we should not be in quotes to start with...
+int pcsv_getnextfield()
+{
+  // pcsv_field = ""
+  Buffer field = create
+  while (pcsv_i < pcsv_len)
+  {
+    // if we're in_quotes
+    if (pcsv_in_quotes)
+    {
+      // look at a char
+      char c = pcsv_filein[pcsv_i]
+// print "pcsv_in_quotes: Looking at pcsv_i = " pcsv_i " is character '" c "'\n"
+      pcsv_i++
+      // if it's a quote
+      if (c == '"')
+      {
+        // look at next char.  Remember pcsv_i is already incremented
+        char nextc = pcsv_filein[pcsv_i]   // this could err out at end...
+        // if it's also quote
+        if (nextc == '"')  
+        {
+          // put out a quote as char
+          field += '"'  // concatenate a single char to 
+                                          // end of field 
+          pcsv_i++               // skip the additional quote
+        }
+        else
+        {
+          // set in_quotes to false
+          pcsv_in_quotes = false
+        }
+      }
+      else   // it's not a quote char
+      {
+      
+        // if it's a \r make it a \n NOT SURE IF THIS IS THE RIGHT THING 
+        // TO DO 
+        if ( c == '\r') c = '\n'
+        // put out the char
+        field += c // concatenate to end.  Ought to use Buffer
+      }
+    }
+    else    // we're not in_quotes
+    {
+      // look at a char
+      char c = pcsv_filein[pcsv_i]
+// print "pcsv NOT IN QUOTES: Looking at pcsv_i = " pcsv_i " is character '" c "'\n"
+      pcsv_i++
+      // if it's a quote (double-quote always inside quotes, so don't need 
+      // to look for it here. 
+      if (c == '"')
+      {
+        // set in_quotes to true
+        pcsv_in_quotes = true
+      }
+      else
+      {
+        // if it's a comma, end the previous field
+        if (c == ',')
+        {
+          pcsv_field = stringOf(field)
+          delete field
+          return pcsv_EOFIELD
+        }
+        // else if it's a newline
+        else if (c == '\r')
+        {
+          // put out the fields as row complete
+          // differentiate between done with row and done with everything
+          pcsv_field = stringOf(field)
+          delete field
+          if (pcsv_i == pcsv_len-1) // pcsv_i is already pointing to next char
+          {    
+            return pcsv_EOFILE
+          }
+          else
+          {
+            return pcsv_EOROW
+          }
+        }
+        else
+        {
+          // else put out the char
+          field += c "" // concatenate
+        }
+      }
+    }
+  }
+  pcsv_field = stringOf(field)
+  delete field
+  return pcsv_EOFILE
+}   // end of pcsv_getnextfield()
+
+// reads the entire file into a global variable pcsv_filein.  Don't touch it!
+// We assume the first row holds the column headers.  More flexibility could be
+// built in, but haven't done it.
+bool pcsv_initfile (string filename)
+{
+  pcsv_filein = readFile (filename)  // manual doesn't say what error does
+  pcsv_len = length (pcsv_filein)
+  if (pcsv_len == 0) return false
+  pcsv_i = 0
+
+  // get the first row, recording column numbers and contents.  THis fixes 
+  // max number of columns in each row - any data in columns past this first
+  // row's length will be lost.
+  int colno = 0
+  while (true) 
+  {
+    int fieldresult = pcsv_getnextfield()
+    if (fieldresult == pcsv_ERROR or fieldresult == pcsv_EOFILE) //-
+        ackAndHalt ("ERROR or EOF while parsing first row of csv file")
+    
+    // should be a good field.  But in first row, can't be blank.
+    if (pcsv_field == "")  ackAndHalt ("header row has blank entry, bye")
+    
+    // pcsv_coldefs{pcsv_field} = colno
+    put (pcsv_coldefs, pcsv_field, colno)
+    // pcsv_colnames{colno} = pcsv_field
+    put (pcsv_colnames, colno, pcsv_field)
+    colno++
+    if (fieldresult == pcsv_EOROW) break  // we're don
+  }
+
+  pcsv_numcols = colno
+  print "DONE\n" 
+  
+  pcsv_rowno = 1
+  return true
+}
+
+int pcsv_nextrow()    // returns row number.  header row is 0.  -1 is EOF
+{
+  // are we at end of file?
+  if (pcsv_i == pcsv_len) return -1   // probably ought to clean up Skip lists
+  // we put each field in pcsv_colvals
+
+  int colno = 0
+  while (true) 
+  {
+    int fieldresult = pcsv_getnextfield()
+    if (fieldresult == pcsv_ERROR)  //-
+        ackAndHalt ("ERROR while parsing row " pcsv_rowno " of csv file")
+    
+    // should be a good field.  In data row, can be blank.
+    // pcsv_coldefs{pcsv_field} = colno
+    // oops.  what's field name?
+    string colname
+    if ( colno < pcsv_numcols)
+    {
+      if (find(pcsv_colnames, colno, colname))
+      {
+        // pcsv_colvals{colname} = pcsv_field
+        delete (pcsv_colvals, colname)  // have to delete first.  Lame.
+        bool goodput = put (pcsv_colvals, colname, pcsv_field)
+        if (!goodput)  //-
+            ackAndHalt ("Failed to record val '" pcsv_field "'  for key '" colname "'")
+      }
+      else
+      {
+         ackAndHalt ("Unexpected error finding column number for field # " colno "")
+      }
+    }
+    else
+    {
+      print "Found data beyond end of column definitions: " colno " has " pcsv_field "\n"
+    }
+    colno++
+    if (fieldresult == pcsv_EOROW or fieldresult == pcsv_EOFILE) break  // done
+  }
+  int returnval = pcsv_rowno
+  pcsv_rowno++
+  return returnval
+}
+
+/*
+Skip pcsv_colnames = create()
+Skip pcsv_coldefs = createString()
+Skip pcsv_colvals = createString()
+*/
+string pcsv_getval (string colname)
+{
+  string val
+  if (!find(pcsv_colvals, colname, val))  //-
+      ackAndHalt ("Couldn't find a column named " colname)
+  return val
+}
+
+//  string pcsv_getvali (int i)

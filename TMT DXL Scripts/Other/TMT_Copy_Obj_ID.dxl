@@ -1,0 +1,23 @@
+/*
+Copy Object ID to another text attribute
+
+This utility copies each object's unique Object Identifier (combination of user defined module prefix and
+  DOORS assigned Absolute Number) to a custom user defined text attribute.
+
+Instructions:
+1) Edit "copiedID" variable string with name of destination text attribute from DOORS.
+2) Open module to modify. Select TOOLS -> EDIT DXL -> LOAD (find dxl script) -> Run
+3) Script will copy Object Identifier of each object into a corresponding text attribute.
+*/
+//
+
+Module m = current
+Object o
+string copiedID = "TMT ID"  // Name of destination attribute
+string id = "" 
+
+for o in current Module do {
+   id = identifier(o)
+   o.copiedID = id
+   
+}
