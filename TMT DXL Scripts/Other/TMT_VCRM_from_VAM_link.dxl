@@ -1,0 +1,118 @@
+// TMT VCRM Script for viewing verification information the VAM module within the requirements module using dynamic DXL
+//   See below on how to use it, or the TMT Verification Plans document
+
+// Started from an IBM example trace analysis
+// Origional IBM Licence agreement
+// Licensed Materials - Property of IBM - some unique copyrights (i.e., the ability to copy,
+// modify, distribute) may be licensed in certain circumstances (e.g., sample/template code
+// intended to be used by customers to build upon and distribute as their own products).
+// DOORS - %full_filespec: simpletr.dxl~8:dxl:ERS#1 % %date_created: Thu Jan 8 15:24:17 2009 %
+// (c) Copyright IBM Corporation 1993, 2009. All Rights Reserved.
+// U.S. Government Users Restricted Rights: Use, duplication or disclosure restricted by
+// GSA ADP Schedule Contract with IBM Corp.
+
+/* *************************************************
+   Basic function information
+   
+The script is meant to be used as a dynamic DXL column in the VCRM view. For an example, see the VCRM view in the APS module
+It searched the linked-in objects for those that point to a VAM module.
+If so, it uses the header name to identify what to display. The basic format of the header need to be as follows: [REVIEW:Info]
+   where REVIEW is the name of the review and needs to match the VA Method
+   and Info can be the following:
+       blank (default) to diplay the method letter
+       ID to diplay the unique VA ID
+       Name to display the test name as kept in the Object Short Text
+*/
+
+
+/* *************************************************
+   Setup
+   ************************************************* */
+
+// prevent dxl timeout dialog
+pragma runLim, 0
+
+// change these lines to search through different attributes, or a different milestone (these are the TMT default ones)
+const string s_attr_milestone = (NLS_("VA Milestone"))
+const string s_attr_method = (NLS_("VA Method"))
+
+// define sub-function to clean up header string
+string trimWhitespace(string s) {
+   int first = 0
+   int last = ( length s ) - 1
+   while ( last > 0 && isspace( s[ last ] ) ) last--
+   while ( isspace( s[ first ] ) && first < last ) first++
+   if ( first == last && isspace s[first] ) return ""
+   return s[ first:last ]
+}
+
+/* *************************************************
+   Parsing the column header to see what to display
+   ************************************************* */
+
+// use column header as milestone
+string s_column_header = title( currentColumn() )
+string s_milestone // used to store the milestone name from the column header
+string s_VA_info_to_display // used to see what information should be displayed, either from the header or default to Method.
+
+// check if column header starts with "[", if so assume square brackets and remove them.
+if( null cistrcmp( s_column_header[0] "", "[" ) )
+  { // if we find a "[", assume the "]" is there as well
+    s_column_header = s_column_header[1:length(s_column_header)-2]
+  }
+
+// check if there is a ":" in the name. If not, assume we want to method; however, if there is one, parse it to see what info is wanted
+int offset
+int len
+
+if ( findPlainText(s_column_header, ":", offset, len, false)) {
+  s_milestone = s_column_header[0 : offset -1] // subtact one to remove : from the output
+  s_VA_info_to_display = trimWhitespace(s_column_header[offset +1 :]) // here add one to remove the :, and also remove white spaces
+} else { // no delimiter found
+  s_milestone = s_column_header
+  s_VA_info_to_display = (NLS_("Method"))
+}
+
+/* *************************************************
+   Loop through the in-links
+   ************************************************* */
+
+Link l
+LinkRef lr
+string s = null
+
+// process in-links
+for l in all(obj <- (NLS_("*"))) do {
+  ModuleVersion sourceVer = sourceVersion(l) // get absolute location of linked module
+
+  if (exists(module sourceVer)) { // only relevant if module exists
+    if (null data(sourceVer)) { // only relevant if module is closed
+      load(sourceVer, false) // ensure module is open
+    }
+
+    Object oSource = source l
+
+    if (oSource != null) { // if valid handle
+      s = probeAttr_(oSource, s_attr_milestone) // check that the milestone attribute exists, in case there are other non-VAM links
+      if ((!null s) && (null cistrcmp( (oSource.s_attr_milestone ""), s_milestone )) ) {
+        if (null cistrcmp( ( s_VA_info_to_display ""), "Method" )) { // if info to be displayed is the mothod
+          // since dxl doesn't seem to have a switch/case statement, there is just a list of if statements
+          if (null cistrcmp( (oSource.s_attr_method ""), "Design") )        { display "D" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "Test") )          { display "T" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "Data Analysis") ) { display "A" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "Inspection") )    { display "I" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "Demonstration") ) { display "M" (NLS_("")) }
+        }
+        if (null cistrcmp( ( s_VA_info_to_display ""), "Name" )) { // if info to be displayed is the mothod
+          display oSource."Object Short Text"
+        }
+        if (null cistrcmp( ( s_VA_info_to_display ""), "ID" )) { // if info to be displayed is the mothod
+          display identifier(oSource) // This gives the ID (using prefix followed by absolute number)
+        }
+      }	
+    }
+  }
+  else { // warn user
+    display LS_("String_Invalid_source_module",NLSTEMP_("Invalid source module '")) (fullName sourceVer) (NLS_("'."))
+  }
+}
