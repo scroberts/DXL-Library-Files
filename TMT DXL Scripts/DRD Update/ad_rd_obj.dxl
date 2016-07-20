@@ -99,6 +99,7 @@ string dccDocStatus = ""
 string DocumentTitle = ""
 string DocumentNo = ""
 string DocumentRev = ""
+string DocumentObjText = ""
 string CADDocumentNo = ""
 string DocumentHyperlink = ""
 string CurrentObjectText = ""
@@ -114,13 +115,14 @@ int CountDocsFound = 0
 int CountDocsNotFound = 0
 int CountDeletedLinks = 0
 int CountCreatedLinks = 0
+int CountSkipped = 0
 
-Regexp AD_re = regexp "^AD.*"
-Regexp RD_re = regexp "^RD.*"
-Regexp DocID_re = regexp "^[0-9]+$"
+Regexp AD_re = regexp2 "^AD[0-9]+"
+Regexp RD_re = regexp2 "^RD[0-9]+"
+Regexp DocID_re = regexp2 "^[0-9]+$"
 
 string ADRD_prefix = ""
-
+int lenprefix = 0
 
 print "Module: " m."Name" "\n"
 
@@ -151,6 +153,7 @@ if ( exists(ModName_ LinkModule) )			// exists needs a module handle
    halt
 }
 
+Buffer bufferText = create()
 
 
 //=======================================================================================================
@@ -172,7 +175,7 @@ for o in m do {
 //=======================================================================================================
 // Grab the Object Text for this object.  Use regexp to test for AD or RD.
 
-   CurrentObjectText = o."Object Text"
+   CurrentObjectText = o."Object Text"		// grab existing AD/RD text (string format, drops any bold)
 
    ADorRD = ""
    if (AD_re CurrentObjectText) 
@@ -258,6 +261,7 @@ for o in m do {
          } else
          {
             print "DocID is NOT valid:" DocID "   This object will be skipped. \n"
+            CountSkipped++
             continue					// jump to the top of the loop over DRD objects
          }
 
@@ -286,6 +290,7 @@ for o in m do {
                dccDocTitle = ""
                dccDocStatus = ""
                DocumentTitle = ""
+               DocumentObjText = ""
                CADDocumentNo = ""
                DocumentHyperlink = ""
                ADRDdcchyperlink = ""
@@ -296,6 +301,7 @@ for o in m do {
                dccDocTitle 		= d."dccDocTitle"
                dccDocStatus 		= d."dccDocStatus"
                DocumentTitle 		= d."DocumentTitle"
+               DocumentObjText 		= d."Object Text"
                DocumentNo 		= d."DocumentNo"
                CADDocumentNo 		= d."CADDocumentNo"
                DocumentRev 		= d."DocumentRev"
@@ -349,15 +355,17 @@ for o in m do {
 
 
          UpdateCount++
-         newtext = ADRD_prefix
+         newtext = ADRD_prefix		// begin assembling the new AD/RD text citation
 
          if (!null dccDocTitle) 	// use dccDocTitle if not empty (this is the preferred title)
          {
-            newtext = newtext "\n\t" dccDocTitle
+//changed_to_objtxt            newtext = newtext "\n\t" dccDocTitle
+            newtext = newtext "\t" DocumentObjText
 
          } else			// dccDocTitle missing, so use the non-TMT document title
          {
-            newtext = newtext "\n\t" DocumentTitle
+//changed_to_objtxt            newtext = newtext "\n\t" DocumentTitle
+            newtext = newtext "\t" DocumentObjText
          }
 
          if (!null CADDocumentNo) 		// add CADDocumentNo if not empty
@@ -463,9 +471,15 @@ for o in m do {
 
          newtext = newtext "\n"		// add extra blank line at the bottom to improve readability after export
 
-         if (OBJtext_OR_CRtext == "OBJ") { o."Object Text" = newtext }
-         if (OBJtext_OR_CRtext == "CR") { o."CR Text" = newtext }
+//not_bold         if (OBJtext_OR_CRtext == "OBJ") { o."Object Text" = newtext }
+//not_bold         if (OBJtext_OR_CRtext == "CR") { o."CR Text" = newtext }
 
+         bufferText = "{\\b " ADRD_prefix "}"	// start off by making the AD/RD number bold
+         lenprefix = length(ADRD_prefix)
+         bufferText += newtext[lenprefix:]		// tack on the remaining text from the new citation
+
+         if (OBJtext_OR_CRtext == "OBJ") { o."Object Text" = richText tempStringOf bufferText }
+         if (OBJtext_OR_CRtext == "CR") { o."CR Text" = richText tempStringOf bufferText }
 
 
       } else				// the cited AD doc was NOT found
@@ -479,6 +493,8 @@ for o in m do {
 
 }		// end loop over objects in the DRD
 
+refresh(m)			// refresh the display so these changes are visible
+
 
 //=======================================================================================================
 // Clear memory (becuase DXL is not good at memory management)
@@ -486,6 +502,7 @@ for o in m do {
 delete (AD_re)
 delete (RD_re)
 delete (DocID_re)
+delete bufferText
 
 
 //=======================================================================================================
@@ -497,4 +514,5 @@ print CountDocsNotFound " cited documents were NOT found. \n"
 print UpdateCount " AD/RD objects were upated in the DRD. \n"
 print CountDeletedLinks " links were deleted. \n"
 print CountCreatedLinks " links were created. \n"
+print CountSkipped " objects were not recognized and were skipped. \n"
 print "Finished \n"
