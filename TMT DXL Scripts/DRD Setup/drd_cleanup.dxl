@@ -103,7 +103,7 @@ for o in m do {					// Step through the objects in this module
    if (obj_text[0:5] == "Figure")		// is this object a figure caption
    {
       o."IsReq" = false
-      o."Paragraph Style" = "<Object Text:Figure Caption>"
+      o."Paragraph Style" = "<Object Text:Caption>"
       prev_obj = "figure caption"
 
       continue
@@ -112,7 +112,7 @@ for o in m do {					// Step through the objects in this module
    if (obj_text[0:4] == "Table")		// is this object a table caption
    {
       o."IsReq" = false
-      o."Paragraph Style" = "<Object Text:Table Caption>"
+      o."Paragraph Style" = "<Object Text:Caption>"
       prev_obj = "table caption"
 
       continue
@@ -155,7 +155,7 @@ for o in m do {					// Step through the objects in this module
    if (obj_number < "3") 		// is this object in the intro sections 1 or 2
    {					// set paragraph style to reqt only to get the left indent
       o."IsReq" = false
-      o."Paragraph Style" = "<Object Text:Requirement>"
+      o."Paragraph Style" = "<Object Text:Normal>"
 
       continue
    }
