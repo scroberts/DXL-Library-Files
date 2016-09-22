@@ -392,7 +392,7 @@ print "Begin processing TMT Standard Attributes...  \n"
 string TMTattrs[] = {"TMT ID", "Applicable Subsystems", "Architecture", "IsReq", //-
 	"Modified at Release", "Key", "Driving", //-
 	"CR State", "CR History", "Acceptance State", "Compliance State", "Compliance Notes", //-
-	"Expected Compliance Reference", "SE Notes", "Owner", "Waiver", "All VAs Completed", //-
+	"Compliance Reference", "Compliance Reference Section or Page", "SE Notes", "Owner", "Waiver", "All VAs Completed", //-
 	"Overall Verification Description", "Overall Verification State", "VA Links", //-
 	"VCRM Agreement Status", "Paragraph Style", "CR History", "Linked to OAD Requirements",  //-
 	"Linked to OCD Requirements", "Linked to OPSRD Requirements", "Linked to ORD Requirements", //-
