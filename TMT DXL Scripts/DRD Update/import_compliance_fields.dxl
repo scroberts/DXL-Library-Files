@@ -1,0 +1,503 @@
+// Import DRD Compliance CSV File
+/* 
+ Import compliance fields from csv text file.
+ September 2016
+
+ Description: 	The purpose of this script is to import compliance info for a DRD module.
+		Information is read from a text file (.csv) that was previously exported from excel.
+		 
+ Process:	The script performs these steps:
+		1) Steps through the given csv file, looking for valid content on each line.
+		2) Skips all lines with missing or malformed TMT ID.
+		3) Copies selected fields to the DRD module attributes (see below for details).
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The DRD module is currently open for edit (not read-only).
+		2) The fields in the CSV file are:
+			Field 1 = TMT ID
+				Contents must start with "REQ-".  Anything else causes row to be skipped.
+				Number portion of ID string is 4 digits, left padded with 0s.
+				Imported to attribute "TMT ID"
+			Field 2 = Object Text 
+				This field is not processed by this script.
+			Field 3 = Compliance
+				Contents must be "C", "NC", or "TBD".  Anything else is imported as TBD.
+				Imported to attribute "Compliance State".
+			Field 4 = Compliance Notes
+				Imported to attribute "Compliance Notes".
+			Field 5 = Compliance Reference
+				Imported to attribute "Compliance Reference".
+			Field 6 = Compliance Reference Section or Page
+				Imported to attribute "Compliance Reference Section or Page".
+			Field >6 = additional fields are ignored by the script
+		3) The column headers are ignored.
+		4) The script only handles newlines in the Compliance Notes and Compliance Reference fields.
+		   Any newlines in other processed fields will result in the script only copying the first
+		   portion (up to the first newline) into the DRD module attribute.
+		5) The script will overwrite any existing content in these attributes in the DRD module.
+		6) Assumes TMT IDs in the DRD module are unique.  The script will only import the CSV
+		   compliance data into the first DRD object with that TMT ID.  Others will be ignored.
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) load or paste this script code into the dialog window and click "Run"
+		4) a GUI dialog will appear letting you select the CSV file to read
+		5) the DXL output window will display any errors
+			Inspect those messages, looking for these things:
+				- unrecognized compliance values that were changed to TBD
+				- TMT IDs not found in the DRD module
+		6) review changes in the DRD module (red side-bars) using TMT Compliance View
+			and save the module if satisfied
+
+ Notes:		1) CSV files created on Windows systems should work fine.
+		2) CSV files created on Macs appear to have a problem.  Depending on the method of 
+		   exporting the CSV file, sometimes it might not contain separate lines, and instead 
+		   has one single line.  This can be fixed by opening the CSV file in WordPad on Windows
+		   and then saving the file as a text file.  That file will have multiple lines and
+		   will be read fine by this script.
+		3) If any cell in the excel file contains a single double-quotes character, then the
+		   script will likely produce erroneous output.  This odd situation is not trapped.
+
+*/
+
+pragma runLim, 0		// suppress DXL execution timeout
+
+
+
+
+//=======================================================================================
+// SUBROUTINE to extract the TMT ID from the Object Text
+
+string extractTMTID (string scrtext)
+{
+  if (scrtext[0:0] != "[") return ""
+  int offset_e
+  int len_e
+  if (!findPlainText(scrtext, "]", offset_e, len_e, true, false)) return ""
+  if (offset_e < 2) return ""     // trap error condition
+  string tmtid = scrtext[1:offset_e-1]
+  return tmtid
+}
+
+
+
+//=======================================================================================
+// SUBROUTINE to parse a single CSV line and extract field strings
+
+
+int iField		// these vars defined outside subroutine so they are global
+bool insidequotes
+string tmtid
+string compliance
+string compliance_notes
+string compliance_reference
+string compliance_ref_section
+string objtxt_excel
+
+
+string parseCSVline (string line)
+{
+   int i
+   int iStart
+   int iEnd
+   int linelen = length(line)
+   iStart = 0				// initialize starting index pointer
+   for (i=0; i < linelen; i++)		// step thru each character in this line
+   {
+      if (line[i:i] == ",") 		// this character is a comma
+      {
+         if (!insidequotes)			// not currently in quoted text, so this is a field separator
+         {
+            iEnd = i-1			// set the end index pointer to before this comma
+
+            if (iEnd >= iStart) 	// the previous field was not zero length
+            {
+
+               if (iField == 1) { tmtid = line[iStart:iEnd] }
+               if (iField == 2) { objtxt_excel = line[iStart:iEnd] }
+               if (iField == 3) { compliance = line[iStart:iEnd] }
+               if (iField == 4) { compliance_notes = line[iStart:iEnd] }
+               if (iField == 5) { compliance_reference = line[iStart:iEnd] }
+               if (iField == 6) { compliance_ref_section = line[iStart:iEnd] }
+
+            }
+
+            iStart = iEnd + 2		// shift the start index to after this comma
+            iField++
+
+         } else	{			// currently inside quotes, ignore this comma
+
+         }
+      } else				// this char is not a comma
+      {
+         if (line[i:i] == "\"")	// this character is a double-quote
+         {
+            if (insidequotes)		// already in quoted text
+            {
+               insidequotes = false
+            } else 			// not already in quoted text, this starts quoted text
+            {
+               insidequotes = true
+            }
+         }
+      }
+   }
+
+// need to handle the end of the line since there may be no comma after the 6th field
+
+   if (iStart < linelen && iField == 6) { compliance_ref_section = line[iStart:linelen-1] }
+
+   if (insidequotes)			// hit end of line, but still inside a quoted section of text
+   {
+      return line[iStart:linelen-1]	// return the last partial field string
+
+   } else
+   {
+      return "not insidequotes - yay"
+   }
+
+
+}	// end of subroutine definition
+
+
+
+//=======================================================================================
+// SUBROUTINE to run if user clicks cancel button when locating CSV file to open
+
+bool userCancelled = false
+void cancelFileOpen(DB box)
+{
+   ack "CSV file selection is cancelled.  Aborting."
+   userCancelled = true
+}
+
+
+//=======================================================================================
+// SUBROUTINE to run if user clicks submit button when locating CSV file to open
+
+void submitFile(DB box)		// do nothing here
+{				// this routine is so i can remove the "close" button
+   ;				// and use a "submit" button instead
+}				// because "close" is not intuitive
+
+
+
+
+
+//=======================================================================================
+//=======================================================================================
+// MAIN CODE
+
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+
+if (!isEdit current)
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+
+
+//=======================================================================================
+// Open the CSV text file
+
+
+string CSVfile = ""
+
+DB db = create "Select Your CSV File (clear field to cancel)"	// create the dialog box and name it
+DBE fn = fileName db			// use fileName function to prompt user for file
+ok(db, "Cancel", cancelFileOpen)	// add a cancel button to the dialog
+ok(db, "Submit", submitFile)		// add a submit button to the dialog
+close(db, false, submitFile)		// prevent a default "close" button from appearing
+realize db
+block db				// display the dialog and pause until user responds
+
+CSVfile = get fn			// get the user-chosen filename (full path)
+
+release db
+destroy db				// free up memory used by the dialog
+db = null
+
+if (userCancelled)			// This looks stupid, but it crashes DOORS when I
+{					// did the halt command inside the cancelFileOpen routine
+   ack "I'm not kidding!"
+   halt
+}
+
+
+if (CSVfile == "")
+{
+   ack "CSV filename is empty.  Aborting."
+   halt
+}
+
+print "Opening the CSV file: " CSVfile "  \n"	// print debug progress line
+
+if (canOpenFile(CSVfile,false)) 
+{
+   print "    csv file can be opened. \n"
+
+} else		// cannot open the csv file
+{
+   ack "Failed to open the CSV file.  Aborting."
+   halt
+}
+
+Stream input = read CSVfile
+
+
+
+
+//=======================================================================================
+// Initialize variables
+
+int linecount = 0
+int linelength
+int offset
+int len
+string srcNum
+int srcNumLen
+
+Object o
+string objtxt
+string this_tmtid
+bool found_id
+int idNotFound = 0
+int updated = 0
+int countOddCompliance = 0
+int brokenlines = 0
+int len_notes
+int len_ref
+string tempstring
+
+int iStart
+int iEnd
+
+string processline
+
+
+string savedtext_notes
+string savedtext_ref
+int brokenfield
+string IDs_not_found = ""
+
+
+
+//=======================================================================================
+// Step through the CSV file
+
+
+print "Looping over CSV file...  \n"
+string CSVline
+
+while (true)
+{
+
+   input >> CSVline				// read in 1 line at a time
+
+   if (end of input) break
+   linecount++					// init counter of all lines seen in csv file
+   brokenlines = 0
+   brokenfield = 0
+   savedtext_notes = ""
+   savedtext_ref = ""
+
+   // If this line begins with a comma (1st csv value missing) then skip this line
+   if (CSVline[0:0] == ",") continue
+
+   // If this line does not begin with a TMT ID, then skip this line
+   if (CSVline[0:3] != "REQ-") continue
+
+
+
+// Parse the data fields in this csv file
+//    step through the rest of the line looking for a comma, but ignoring when inside double-quotes
+
+   tmtid 		= ""		// initialize data fields for this line
+   objtxt_excel 	= ""
+   compliance 		= ""
+   compliance_notes 	= ""
+   compliance_reference = ""
+   compliance_ref_section = ""
+   insidequotes 	= false
+
+   iField = 1				// initialize id of the next field to find
+
+   processline = parseCSVline (CSVline)
+
+
+// Need to handle condition where a newline appeared within quoted text.  This might reasonably happen
+//    in either Reqt Txt or Compliance Notes or Compliance Reference.  Reqt Txt is not processed, so it
+//    is not addressed here.
+//    There can be many newlines inside quoted text; each will result in a new line in the CSV file.
+//    This is detected by: got here in the code and am still inside quotes.
+
+
+   while (insidequotes) 
+   {
+      print "Processing broken line - iField=" iField "  \n"
+      print "partial line=" processline " \n"
+
+      if (iField == 4) 			// field4 has broken line, save current portion
+      { 
+         brokenfield = 4
+         savedtext_notes = savedtext_notes processline 
+      }
+      if (iField == 5) 			// field5 has broken line, save current portion
+      { 
+         brokenfield = 5
+         savedtext_ref = savedtext_ref processline "\n"
+      }
+
+      input >> CSVline			// read the next line in the CSV file
+      if (end of input) break
+      linecount++
+
+      processline = parseCSVline (CSVline)
+
+
+      print "  after broken line: insidequotes=" insidequotes " iField=" iField " \n"
+
+      brokenlines++
+      if (brokenlines > 50) 	// trap for a runaway condition
+      {
+         print "brokenlines > 50 on a single row.  aborting"
+         close(input)					// close the input stream
+         halt
+      }
+   }
+
+
+   if (brokenfield == 4)					// Warning: I have not tested this block
+   {								// of code to see if it works when both
+      compliance_notes = savedtext_notes compliance_notes	// fields have newlines for the same object.
+      brokenfield = 0
+   }
+
+   if (brokenfield == 5)
+   {
+      compliance_reference = savedtext_ref compliance_reference
+      brokenfield = 0
+   }
+
+
+// Clean up Notes and Reference fields, removing double quotes on ends if present
+
+   len_notes = length(compliance_notes)
+   if (compliance_notes[0:0] == "\"" && compliance_notes[len_notes-1:len_notes-1] == "\"")
+   {
+      tempstring = compliance_notes[1:len_notes-2]
+      compliance_notes = tempstring
+   }
+   len_ref = length(compliance_reference)
+   if (compliance_reference[0:0] == "\"" && compliance_reference[len_ref-1:len_ref-1] == "\"")
+   {
+      tempstring = compliance_reference[1:len_ref-2]
+      compliance_reference = tempstring
+   }
+
+
+
+// debug print statements
+//print "tmtid=" tmtid "============================ \n"
+//print "compliance=" compliance "\n"
+//print "c notes=" compliance_notes "\n"
+//print "c ref=" compliance_reference "\n"
+
+
+// alter the Compliance value if it doesn't match an accepted value
+
+   if (compliance != "C" && compliance != "NC" && compliance != "TBD" )
+   {
+      print "    c changed to tbd \n"
+      compliance = "TBD"
+      countOddCompliance++
+   }
+
+
+// Find this TMT ID in the DRD module
+
+   found_id = false
+   for o in m do {
+
+      objtxt = o."Object Text"			// get string version of obj txt field (no RTF)
+      this_tmtid = extractTMTID (objtxt)
+      if (this_tmtid != "")			// this obj contains a TMT ID
+      {
+         if (this_tmtid == tmtid)		// does this match the TMT ID from the CSV file
+         {
+            found_id = true
+
+// update the attributes in this DRD module using the data from the CSV file
+
+            o."Compliance State" = compliance		// warning: this attr is an enumeration
+            o."Compliance Notes" = compliance_notes
+            o."Compliance Reference" = compliance_reference
+            o."Compliance Reference Section or Page" = compliance_ref_section
+
+            updated++
+
+// print "debug: object updated in DRD (not really) \n"
+
+            break				// jump out of look to speed things up
+         }
+      }
+   }
+
+   if (!found_id)
+   {
+      print tmtid " not found in this module. [skipping] \n"
+      idNotFound++
+      IDs_not_found = IDs_not_found " " tmtid
+      continue					// jump to the next line in the csv file
+   }
+
+
+
+
+}	// end of loop over csv file
+
+
+
+
+
+//=======================================================================================
+// Cleanup
+
+close(input)					// close the input stream
+
+
+
+
+//=======================================================================================
+// Print closeout messages
+
+print linecount " lines read from the CSV file. \n"
+print idNotFound " TMT IDs from CSV file were not found in the DRD module... \n"
+if (idNotFound > 0) 
+{ 
+   print "TMT IDs Not Found: " IDs_not_found " \n"
+   ack "TMT IDs Not Found: " IDs_not_found ""
+}
+print countOddCompliance " compliance values were not recognized and were changed to TBD. \n"
+print updated " objects were updated. \n"
+
+ack "After running this script: \n"  //-
+	"  Review changes to DRD module using TMT Compliance View.  \n" //-
+	"  Save the module if satisfied. \n" //-
+	"  If it didn't appear to work properly, first examine the CSV file.  \n" //-
+	"  CSV files created on Macs appear to have a problem.  Depending on the method of \n"  //-
+	"  exporting the CSV file, sometimes it might not contain separate lines, and instead \n"  //-
+	"  has one single line.  This can be fixed by opening the CSV file in WordPad on Windows \n"  //-
+	"  and then saving the file as a text file.  That file will have multiple lines and \n"  //-
+	"  will be read fine by this script."  
+
+print "Finished \n"
