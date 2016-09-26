@@ -49,13 +49,13 @@
 		6) review changes in the DRD module (red side-bars) using TMT Compliance View
 			and save the module if satisfied
 
- Notes:		1) After running the script, if it didn't appear to work as desired, then first
-		   examine the input CSV file.  Depending on the method of exporting the CSV file,
-		   sometimes it might not contain separate lines, and instead has one single line.
-		   I saw this with "Save As..." from Excel to csv file on a Mac and then opening it
-		   on a Windows system.  I had to open the CSV file in Wordpad and then save the
-		   file as a text file.
-		2) If any cell in the excel file contains a single double-quotes character, then the
+ Notes:		1) CSV files created on Windows systems should work fine.
+		2) CSV files created on Macs appear to have a problem.  Depending on the method of 
+		   exporting the CSV file, sometimes it might not contain separate lines, and instead 
+		   has one single line.  This can be fixed by opening the CSV file in WordPad on Windows
+		   and then saving the file as a text file.  That file will have multiple lines and
+		   will be read fine by this script.
+		3) If any cell in the excel file contains a single double-quotes character, then the
 		   script will likely produce erroneous output.  This odd situation is not trapped.
 
 */
@@ -494,8 +494,10 @@ ack "After running this script: \n"  //-
 	"  Review changes to DRD module using TMT Compliance View.  \n" //-
 	"  Save the module if satisfied. \n" //-
 	"  If it didn't appear to work properly, first examine the CSV file.  \n" //-
-	"  If the CSV file contents are on 1 line, then open in WordPad and save as text file.  \n"  //-
-	"  That trick can change it to multiple lines.  \n"  //-
-	"  Then try this script again, reading that new text file."
+	"  CSV files created on Macs appear to have a problem.  Depending on the method of \n"  //-
+	"  exporting the CSV file, sometimes it might not contain separate lines, and instead \n"  //-
+	"  has one single line.  This can be fixed by opening the CSV file in WordPad on Windows \n"  //-
+	"  and then saving the file as a text file.  That file will have multiple lines and \n"  //-
+	"  will be read fine by this script."  
 
 print "Finished \n"
