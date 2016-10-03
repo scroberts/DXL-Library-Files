@@ -196,8 +196,7 @@ string TMTattrs[] = {"TMT ID", "Applicable Subsystems", "Architecture", "IsReq",
 	"CR State", "CR History", "Acceptance State", "Compliance State", "Compliance Notes", //-
 	"Compliance Reference", "Compliance Reference Section or Page", "SE Notes", "Owner", "Waiver", "All VAs Completed", //-
 	"Overall Verification Description", "Overall Verification State", "VA Links", //-
-	"VCRM Agreement Status", "Paragraph Style", "CR History", "Linked to OAD Requirements",  //-
-	"Linked to OCD Requirements", "Linked to OPSRD Requirements", "Linked to ORD Requirements", //-
+	"VCRM Agreement Status", "Paragraph Style", "CR History",  //-
 	"Name", "Object Heading", "Object Text", "Object Short Text"}
 
 int tasize = sizeof TMTattrs
