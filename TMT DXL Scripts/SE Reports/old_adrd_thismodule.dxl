@@ -1,45 +1,38 @@
-// SE Report: Report Old AD/RD Citations in All DRD Modules
+// SE Report: Report Old AD/RD Citations in This DRD Module
 /* 
- Generate Systems Engineering Report: Report Old AD/RD Citations in all modules - for TMT
+ Generate Systems Engineering Report: Report Old AD/RD Citations in This Module - for TMT
 
- Description: 	The purpose of this script is to report on the state of AD/RD links in the DRD modules.
-		The script outputs a text report located in the user's current working directory.
+ Description: 	The purpose of this script is to report on the state of AD/RD links in the current DRD module.
+		The script outputs a text file located in the user's current working directory.
 		 
  Process:	The script performs these steps:
-		1) Examines each of the modules listed in the script code
+		1) Examines the current module
 		2) Looks for any outlinks in section 1 to the Documents Register
 		3) For each linked document, the script looks for any newer rev of the same document
 			- newer docs are reported so that links might be updated by the module custodian
 		4) The script does not change anything
 			- some links are supposed to point to older versions
 			- any changes are then done by the module custodians 
+		5) Additional output is written to the DXL dialog window - useful for troubleshooting
 
- Assumptions:	1) the output file is named "SR_report.txt"
-		2) the script only examines the modules named in the string array moduleNames[]
-			- to change the modules examined, simply edit the code
+ Assumptions:	1) the output file is named "SE_report.txt"
+		2) the script only examines the current module - assumed to be a DRD module
+			- unknown errors will occur if the current module is not a DRD module
 		3) the Documents Register module name is hard-coded:
 			"/TMT Requirements/Documents Register/Documents Register"
 		4) the Documents link module name is hard-coded:
 			"/TMT Requirements/Links/Documents"
-		5) the script requires read access to all listed DRD modules and the Documents module
-		6) the script will close the Documents Register at the end, 
+		5) the script will close the Documents Register at the end, 
 		   so if you had it open, then it will be closed. we might decide to omit this behavior.
 
  If the Script Crashes:
-		If the script crashes or your DOORS DB connection drops, then be advised that some
-		modules might remain open.  The script opens each DRD module, one ad a time, read-only
-		and does NOT display them.  Likewise, it opens the Documents Register module and
-		keeps it hidden.  If the script crashes then there will likely be 2 modules left open
-		(one DRD module and the Documents module).  You will not notice this because they are
-		hidden.  You can easily se all hidden open modules using the DOORS menu item:
+		If the script crashes, it might leave the Documents Register open.
+		You will not notice this because it is open "hidden".
+		You can easily see all hidden open modules using the DOORS menu item:
 		Tools / Manage Open Modules...
-		By opening the modules read-only, then if the user is kicked out and they do not promptly
-		reconnect to DOORS, then the lingering open modules won't prevent other users from
-		getting work done.
 
-
- Directions:	1) run this script from the Project window
-		2) in the Project window, select menu item: Tools / Edit DXL...
+ Directions:	1) open the module you want to check for old AD/RD citations
+		2) in that module window, select menu item: Tools / Edit DXL...
 		3) paste this script code into the dialog window and click "Run"
 
 
@@ -47,42 +40,11 @@
 pragma runLim, 0	// suppress DXL execution timeout
 
 
-string filename = "SR_report.txt"		// define output filename
+string filename = "SE_report.txt"		// define output filename
 
 
 //=======================================================================================================
 // Variable declarations
-
-string moduleNames[] = {	//-
-	"/TMT Requirements/Level 0 Requirements/OPSPlan", //-
-	"/TMT Requirements/Level 0 Requirements/SRD", //-
-	"/TMT Requirements/Level 1 Requirements/OAD", //-
-	"/TMT Requirements/Level 1 Requirements/OPSRD", //-
-	"/TMT Requirements/Level 1 Requirements/ORD", //-
-	"/TMT Requirements/Level 2 Requirements/Facilities/ENC DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Facilities/SUM DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Instrumentation/CRYO DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Instrumentation/IRIS DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Instrumentation/NFIRAOS DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Instrumentation/LGSF DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Instrumentation/AOESW DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Operations/CSW", //-
-	"/TMT Requirements/Level 2 Requirements/Operations/SCMS", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/APS DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/M1CS DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/M1S DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/M2S DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/M3S DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/STR DRD", //-
-	"/TMT Requirements/Level 2 Requirements/Telescope/TCS DRD", //-
-	"/TMT Requirements/Level 3 Requirements/M1CS/M1CS Actuator DRD", //-
-	"/TMT Requirements/Level 3 Requirements/M1CS/M1CS Sensor DRD", //-
-	"/TMT Requirements/Level 3 Requirements/Telescope/TUS DRD", //-
-	"/TMT Requirements/Level 3 Requirements/NFIRAOS/NRTC DRD", //-
-	"/TMT Requirements/Level 3 Requirements/NFIRAOS/VCAM DRD", //-
-	"/TMT Requirements/Level 3 Requirements/NFIRAOS/NWC DRD"}
-
-int numModules = sizeof moduleNames
 
 string Documents_Module 	= "/TMT Requirements/Documents Register/Documents Register"
 Module docModule
@@ -91,9 +53,8 @@ Link outLink
 
 int i
 string 		thisModuleName
-ModName_ 	thisModuleRef
 Item 		thisModuleItem
-Module 		thisModule
+
 
 Object o
 Object d
@@ -124,19 +85,20 @@ string doc_docno
 string doc_status
 string doc_objtxt
 bool sameDoc
-int loopcounter
 
 
 
 
-// Open the current project
+// Check the current module
 
-Project p = current Project
-if (null p) {
-   ack "No project is open.  Aborting."
+Module thisModule = current
+if (null thisModule)
+{
+   ack "No module is open!  Aborting."
    halt
 }
-print "Project " (name p) "\n"
+thisModuleName = thisModule."Name"
+
 
 print "Current Dir:" currentDirectory "\n"
 
@@ -161,56 +123,25 @@ if (null docModule)
 output = write filename
 if (null output) {
    ack "Failed to open output file.  Aborting."
+   close(docModule)			// close the Documents module
    halt
 }
 print "Output file: " filename "\n"
 
-loopcounter = 0
 
 
 // Begin report
 
-output << "TMT SE Report: Link Status for AD/RD Sections in Each DRD \n"
+output << "TMT SE Report: Link Status for AD/RD Sections in this module \n"
 string thedate = stringOf(today)
 output << thedate "\n\n"
 // output << stringOf(dateOf intOf today) "\n"		// this adds the time of day, but changes date to xx/xx/xx format
 output << "The IDs reported below are the DOORS IDs for the objects listed. \n\n\n"
 
+print "Processing: " thisModuleName "\n"
+output << "\nPROCESSING: " thisModuleName "\n"
 
 
-//=======================================================================================================
-// Loop over the list of modules
-
-
-for (i=0; i < numModules; i++)
-{
-   thisModuleName = moduleNames[i]
-   print "Processing: " thisModuleName "\n"
-   output << "\nPROCESSING: " thisModuleName "\n"
-
-   if (!module(thisModuleName)) {		// error trapping, report and skip
-      print "   ERROR: this is not a module or it is not readable.  Skipping. \n"
-      continue					// jump to the next in this loop
-   }
-
-   thisModuleRef = module(thisModuleName)	// get the module handle from the module name
-   if (null thisModuleRef) {			// error trapping, report and skip
-      print "   ERROR: got a null module handle.  Skipping. \n"
-      continue
-   }
-
-
-loopcounter++
-//if (loopcounter > 2) {break}		// debug line to limit run to a few modules during testing
-
-// Open this module
-
-   thisModule = read(thisModuleName,false)	// open the module for read
-   if (null thisModule) {
-      ack "   ERROR: unable to open this module.  Skipping. \n"
-      output << "   ERROR: unable to open this module.  Skipping. \n"
-      continue
-   }
 
 
 //=======================================================================================================
@@ -252,7 +183,7 @@ loopcounter++
          if (dccDocStatus != "LATEST") {
 
 
-            for d in docModule do {			// loop over all docs in the Docs module
+            for d in docModule do {				// loop over all docs in the Docs module
 
                doc_absno = d."Absolute Number"
 
@@ -262,12 +193,9 @@ loopcounter++
                doc_status = d."dccDocStatus"
                doc_docno  = d."DocumentNo"
                doc_objtxt = d."Object Text"
-               titleinfo = ""
-//               if (length(doc_objtxt) < 60) {
-                  titleinfo = doc_objtxt
-//               } else {
-//                  titleinfo = doc_objtxt[0:60] "..."
-//               }
+
+               titleinfo = doc_objtxt
+
 
 
 // Check if this doc is the same as the linked doc.  
@@ -289,7 +217,7 @@ loopcounter++
 
                   }
 
-               } else {							// dccDocNo not empty
+               } else {						// dccDocNo not empty
 
                   if (dccDocNo == doc_no) { sameDoc = true }
 
@@ -330,17 +258,8 @@ loopcounter++
 
    }	// end of loop over objects in this module
 
-   print "   AD/RD links found in this module: " countADRD "\n"
-   output << "      AD/RD links found in this module: " countADRD "\n"
-
-// Close this module
-
-   close(thisModule, false)
-
-
-}	// end of loop over list of modules
-
-
+print "   AD/RD links found in this module: " countADRD "\n"
+output << "      AD/RD links found in this module: " countADRD "\n"
 
 output << "\n\nEND OF REPORT. \n"
 
