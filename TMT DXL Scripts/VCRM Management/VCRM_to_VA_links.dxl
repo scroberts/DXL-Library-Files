@@ -1,7 +1,30 @@
 // VCRM to VA Links
-/* csv import from file.
+/* Import VA descriptions from a CSV (Excel) file.
+   Version: VCRM_to_VA_links.dxl
 
-Version: VCRM_to_VA_links.dxl
+Description:	The VCRM to VA Links script will populate the VAM module with information provided
+		in an input Excel file (saved as CSV file). Links are created from each VA entry
+		to the associated requirement in the DRD module.
+
+Process:	
+
+
+Assumptions:	The script requires the following conditions for proper function:
+		1) The first row of the CSV file must contain the column headers
+		2) The 1st column of the CSV file must be TMT ID and have the header "TMT ID"
+		3) The 2nd column of the CSV file is expected to contain the reqt text
+		4) The 3rd column of the CSV file must contain the VA Name with the header "VA Name"
+		5) The CSV file must contain a column with a header "Overall Method"
+		6) The columns between 3rd and Overall Method are separate milestones
+		7) The CSV file must contain a column with a header "Verification Description"
+
+
+Directions:	1) Open the desired VA Module and the associated DRD module in exclusive edit mode.
+		2) Run this script from the VA Module
+
+Notes:		a. Dialog windows will display errors and other important information such as
+		   skipped rows of the CSV file.
+
 */
 
 pragma runLim, 0
@@ -11,6 +34,8 @@ pragma runLim, 0
 // Stream debugout = write ("Y:\\TMT\\debugout.txt")
 // if (null debugout)  ackAndHalt ("UH OH COULD NOT OPEN DEBUG OUTPUT FILE")
 
+// The include statement below must have the full pathname for it to work properly
+// in the TMT custom DOORS menu.
 #include "TMT DXL Scripts/VCRM Management/include_files/csvimport.dxl"
 
 string enderrmsg = ""   // to report errors at the end
@@ -19,15 +44,15 @@ int enderrcount = 0
 // Now look at the current module, which should be the VAM            //
 ////////////////////////////////////////////////////////////////////////
 Module vam = current
-if (null vam) ackAndHalt ("No current module (VAM), bye")
-if (!isEdit(vam))  ackAndHalt ("Current module not open for edit, bye")
+if (null vam) ackAndHalt ("No current module (VAM).  Aborting.")
+if (!isEdit(vam))  ackAndHalt ("Current module not open for edit.  Aborting.")
 string vamname = name(vam)
 string vamfullpath = fullName (vam)
 int offset
 int len
 bool foundvam = findPlainText(vamname, "VAM", offset, len, true)
 if (!foundvam) //-
-    ackAndHalt ("Current module doesn't seem to have string VAM in its name, bye")
+    ackAndHalt ("Current module doesn't seem to have string VAM in its name.  Aborting.")
 
 // find current last in VAM.  We'll start putting things after that.  Not too sophisticated
 //  too unsophisticated: Object VAMlast = last vam
@@ -40,7 +65,7 @@ for o in entire vam do
   int level = level (o)
   if (level == 1) vlasttoplevel = o
 }
-if (null vlasttoplevel) ackAndHalt ("Couldn't find last top level object: WTF?")
+if (null vlasttoplevel) ackAndHalt ("Couldn't find last top level object.  Aborting.")
 
 ////////////////////////////////////////////////////////////////////////
 // Check to be sure there's at least one other open module.  Doesn't  //
@@ -65,7 +90,7 @@ if (countmods > 0)
 }
 else
 {
-   ackAndHalt ("Found no open modules other than vam, bye")
+   ackAndHalt ("Found no open modules other than VAM.  Aborting.")
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -81,7 +106,10 @@ void getfname (DB inputfnamebox)
   csvfname = get inputfname
   return
 }
-apply (inputfnamebox, "Apply", getfname)
+apply (inputfnamebox, "Apply", getfname)	// this line means the user must click the "Apply" button
+						// in the dialog, otherwise the filename will not be fetched
+						// however, the "Apply" button does not close the dialog
+						// so the user must also click the "Close" button
 block (inputfnamebox)
 hide (inputfnamebox)
 
@@ -90,7 +118,7 @@ ack "Will use VCRM input file " csvfname
 bool result = pcsv_initfile (csvfname)
 
 if (!result) //-
-    ackAndHalt ("Could not open and initialize csv file '" csvfname "', bye")
+    ackAndHalt ("Could not open and initialize csv file '" csvfname "'.  Aborting.")
 
 int numcols = pcsv_getncols()
 print "csv file has " numcols " columns in header\n"
@@ -100,9 +128,12 @@ print "csv file has " numcols " columns in header\n"
 // the idea that they're an acronym ending in R.  Maybe just that     //
 // it's an acronym is sufficient.  Acronym is single alphabetic word  //
 ////////////////////////////////////////////////////////////////////////
+
+// Scan through skiplist of column headers to find "Overall Method"
+
 int colno
 string k
-Regexp acroRE = regexp ("^[A-Za-z]+$")
+//not used   Regexp acroRE = regexp ("^[A-Za-z]+$")
 int firstmilestonecol = 2    // first col is 0, no?
 int lastmilestonecol = 0
 // first find the "Overall Method" column.  If none, goodbye
@@ -117,12 +148,15 @@ for colno in pcsv_coldefs do
 }
 if (lastmilestonecol < firstmilestonecol)
 {
-  ackAndHalt ("couldn't find 'Overall Method' column in '" csvfname "', bye")
+  ackAndHalt ("couldn't find 'Overall Method' column in '" csvfname "'.  Aborting.")
 }
+
+// Scan skiplist of column headers to count milestones and extra columns
 
 int nMilestones = 0
 int nExtraColumns = 0
 bool foundtmtid = false
+bool foundverifsn = false
 for colno in pcsv_coldefs do
 {
   k = (string key pcsv_coldefs)
@@ -130,6 +164,8 @@ for colno in pcsv_coldefs do
   // if (acroRE k) nMilestones++  // DOING BY POSITION NOW
   if (colno >= firstmilestonecol && colno <= lastmilestonecol)
   {
+    if (k == "Verification Short Name") continue	// added by evans
+    if (k[0:10] == "Requirement") continue		// added by evans
     nMilestones++
   }
   else if (colno > lastmilestonecol)
@@ -137,12 +173,14 @@ for colno in pcsv_coldefs do
     nExtraColumns++
   }
   if (k == "TMT ID") foundtmtid = true
+  if (k == "Verification Short Name") foundverifsn = true
 }
 if (nMilestones == 0)  //-
-    ackAndHalt ("Couldn't find any milestones in column headers")
-if (!foundtmtid) ackAndHalt ("Couldn't find TMT ID in column headers")
+    ackAndHalt ("Couldn't find any milestones in column headers.  Aborting.")
+if (!foundtmtid) ackAndHalt ("Couldn't find TMT ID in column headers.  Aborting.")
 
-// now record them in an array
+// Scan skiplist and save milestones & extra columns in arrays
+
 string sMilestones[nMilestones]
 string sExtraColumns[nExtraColumns]
 int i = 0
@@ -152,9 +190,11 @@ string emsg = "Found " nExtraColumns " extra columns to consider:"
 for colno in pcsv_coldefs do
 {
   k = (string key pcsv_coldefs)
-  // if (acroRE k) 
+  // if (acroRE k) 	// regexp is not used now
   if (colno >= firstmilestonecol && colno <= lastmilestonecol)
   {
+    if (k == "VA Name") continue			// added by evans
+    if (k[0:10] == "Requirement") continue		// added by evans
     sMilestones[i] = k
     mmsg = mmsg " " k
     i++
@@ -187,6 +227,8 @@ Object vamlast = create after vlasttoplevel
 vamlast."Object Heading" = "New Activities inserted from file " csvfname //-
                            " on " sthedate
 
+string skippedrows = "Skipped Rows in the CSV File: "
+
 
 // Now go through the rows of csv
 while (true)
@@ -199,7 +241,8 @@ while (true)
   string tmtid = pcsv_getval ("TMT ID")
   if (tmtid == "")
   {
-    string msg = "Row " ssrowno " has no TMT ID, skipping\n"
+    string msg = "CSV Row " ssrowno " has no TMT ID, skipping\n"
+    skippedrows = skippedrows "\n   " ssrowno " - no TMT ID"
     // too many to put in the end error message - it looks like
     // it didn't succeed.
     // enderrmsg = enderrmsg msg
@@ -216,16 +259,17 @@ while (true)
   string mfullpath
   Object t = null
 
-  for m in p do
+  for m in p do				// for each module in this project
   {
     mname = name (m)
-    if (type(m) != "Formal") continue
+    if (type(m) != "Formal") continue	// if this is not a Formal module, skip it
     mfullpath = fullName (m)
     // print "comparing " vamfullpath " with " mfullpath "\t"
-    if (vamfullpath == mfullpath) continue
+    if (vamfullpath == mfullpath) continue	// skip the VAM module
     countmods++
-    for t in entire m do
+    for t in entire m do		// search for the target object in the DRD module
     {
+      if (isDeleted(t)) continue	// skip this object if it is deleted
       string thisID = t."TMT ID"
       if (thisID == tmtid) foundit = true
       if (foundit) break
@@ -235,7 +279,8 @@ while (true)
   if (!foundit) 
   {
     string msg = 
-         "Could not find TMT ID '" tmtid "' found in ss row " ssrowno " in any open module, skipping\n"
+         "Could not find TMT ID '" tmtid "' found in CSV row " ssrowno " in any open module, skipping this row.\n"
+    skippedrows = skippedrows "\n   " ssrowno " " tmtid " - TMT ID not found in any module"
     enderrmsg = enderrmsg msg
     enderrcount++
     print msg
@@ -248,12 +293,13 @@ while (true)
   //  1) create a new object in VAM for that milestone, filling in 
   //           Spreadsheet                  VAM
   //           --------------------------   --------------
-  //           Object Short Text         -> Object Text
+  //           VA Name                   -> Object Text
   //           Verification Description  -> VA Description
   //           milestone                 -> VA Milestone
   //           milestone (method)        -> VA Method
   //  2) link the new object in VAM to found target in module
-  string ost = pcsv_getval("Object Short Text")
+  string vaname = pcsv_getval("VA Name")
+  if (vaname == "") { vaname = " " }
   string ovd = pcsv_getval("Verification Description")
   int i
   bool foundone = false
@@ -267,18 +313,18 @@ while (true)
       Object newvam = null
       if (isOutline (vamlast)) newvam = create below vamlast
       else                     newvam = create after vamlast
-      if (null newvam)  ackAndHalt ("Couldn't creat new vam entry, bye")
+      if (null newvam)  ackAndHalt ("Couldn't creat new vam entry.  Aborting.")
 
       int newabsno = newvam."Absolute Number"
 // print "created newvam number " newabsno "\n"
-      newvam."Object Text" = ost
+      newvam."Object Text" = vaname
       newvam."VA Description" = ovd
       newvam."VA Milestone" = milestone
       string method
       if (ss_method == "D")      method = "Design"
       else if (ss_method == "M") method = "Demonstration"
       else if (ss_method == "I") method = "Inspection"
-      else if (ss_method == "A") method = "Analysis"
+      else if (ss_method == "A") method = "Data Analysis"
       else if (ss_method == "T") method = "Test"
       else
       {
@@ -286,6 +332,7 @@ while (true)
         enderrmsg = enderrmsg msg
         enderrcount++
         print msg
+        skippedrows = skippedrows "\n   " ssrowno " " tmtid " - milestone method not D, M, I, A, T"
         continue   // THIS SHOULD get us out of this milestone...
       }
       newvam."VA Method" = method
@@ -322,9 +369,11 @@ while (true)
 				string lasterr = lastError
 				if (lasterr != "") ack "UH OH GOT AN ERROR " lasterr "\ncsv row " ssrowno " col " colname " val " val " but continuing"
 			}
-		}
+    }
   }
 }
+
+ack skippedrows ""
 
 print "\n\nAT END, error messages are:\n" enderrmsg "\n"
 if (enderrcount > 0)  

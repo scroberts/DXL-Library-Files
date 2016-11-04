@@ -21,7 +21,7 @@ If so, it uses the header name to identify what to display. The basic format of 
    and Info can be the following:
        blank (default) to diplay the method letter
        ID to diplay the unique VA ID
-       Name to display the test name as kept in the Object Short Text
+       Name to display the test name as kept in the Object Text
 */
 
 
@@ -104,7 +104,7 @@ for l in all(obj <- (NLS_("*"))) do {
           if (null cistrcmp( (oSource.s_attr_method ""), "Demonstration") ) { display "M" (NLS_("")) }
         }
         if (null cistrcmp( ( s_VA_info_to_display ""), "Name" )) { // if info to be displayed is the mothod
-          display oSource."Object Short Text"
+          display oSource."Object Text"
         }
         if (null cistrcmp( ( s_VA_info_to_display ""), "ID" )) { // if info to be displayed is the mothod
           display identifier(oSource) // This gives the ID (using prefix followed by absolute number)
