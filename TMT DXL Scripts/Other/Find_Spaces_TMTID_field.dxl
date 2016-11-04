@@ -1,0 +1,157 @@
+// Find Spaces in TMT ID field
+/* 
+ do cool things
+*/
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+
+//=======================================================================================================
+// Variable declarations
+
+string moduleNames[] = {	//-
+	"/TMT Requirements/Level 0 Requirements/OPSPlan", //-
+	"/TMT Requirements/Level 0 Requirements/SRD", //-
+	"/TMT Requirements/Level 1 Requirements/OAD", //-
+	"/TMT Requirements/Level 1 Requirements/OPSRD", //-
+	"/TMT Requirements/Level 1 Requirements/ORD", //-
+	"/TMT Requirements/Level 2 Requirements/Facilities/ENC DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Facilities/SUM DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Instrumentation/CRYO DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Instrumentation/IRIS DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Instrumentation/NFIRAOS DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Instrumentation/LGSF DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Instrumentation/AOESW DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Operations/CSW", //-
+	"/TMT Requirements/Level 2 Requirements/Operations/SCMS", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/APS DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/M1CS DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/M1S DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/M2S DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/M3S DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/STR DRD", //-
+	"/TMT Requirements/Level 2 Requirements/Telescope/TCS DRD", //-
+	"/TMT Requirements/Level 3 Requirements/M1CS/M1CS Actuator DRD", //-
+	"/TMT Requirements/Level 3 Requirements/M1CS/M1CS Sensor DRD", //-
+	"/TMT Requirements/Level 3 Requirements/Telescope/TUS DRD", //-
+	"/TMT Requirements/Level 3 Requirements/NFIRAOS/NRTC DRD", //-
+	"/TMT Requirements/Level 3 Requirements/NFIRAOS/VCAM DRD", //-
+	"/TMT Requirements/Level 3 Requirements/NFIRAOS/NWC DRD"}
+
+int numModules = sizeof moduleNames
+
+
+string LinkModuleName 		= "/TMT Requirements/Links/Documents"
+Link outLink
+
+int i
+string 		thisModuleName
+ModName_ 	thisModuleRef
+Item 		thisModuleItem
+Module 		thisModule
+
+Object o
+
+string obj_number
+
+
+string tmtID = ""
+int obj_absno
+int loopcounter = 0
+int countoddthings = 0
+int offset
+int len
+
+
+
+
+// Open the current project
+
+Project p = current Project
+if (null p) {
+   ack "No project is open.  Aborting."
+   halt
+}
+print "Project " (name p) "\n"
+
+
+//=======================================================================================================
+// Loop over the list of modules
+
+
+for (i=0; i < numModules; i++)
+{
+   thisModuleName = moduleNames[i]
+   print "\nProcessing: " thisModuleName "\n"
+
+
+   if (!module(thisModuleName)) {		// error trapping, report and skip
+      print "   ERROR: this is not a module or it is not readable.  Skipping. \n"
+      continue					// jump to the next in this loop
+   }
+
+   thisModuleRef = module(thisModuleName)	// get the module handle from the module name
+   if (null thisModuleRef) {			// error trapping, report and skip
+      print "   ERROR: got a null module handle.  Skipping. \n"
+      continue
+   }
+
+
+loopcounter++
+//if (loopcounter > 2) {break}		// debug line to limit run to a few modules during testing
+
+// Open this module
+
+   thisModule = read(thisModuleName,false)	// open the module for read
+   if (null thisModule) {
+      ack "   ERROR: unable to open this module.  Skipping. \n"
+      continue
+   }
+
+
+//=======================================================================================================
+// Process this module - loop over objects looking for spaces in the TMT ID field
+
+   for o in thisModule do {			// loop over the objects in this module
+
+      tmtID = o."TMT ID"
+      obj_absno = o."Absolute Number"
+
+      if (findPlainText(tmtID, " ", offset, len, true, false)) 
+      {
+         print "has space: TMT ID=" tmtID "   absno=" obj_absno " \n"
+         countoddthings++
+      }
+
+
+
+   }	// end of loop over objects in this module
+
+
+
+// Close this module
+
+   close(thisModule, false)
+
+
+}	// end of loop over list of modules
+
+
+
+
+
+
+
+
+//=======================================================================================================
+// Clear memory (becuase DXL is not good at memory management)
+
+
+
+
+
+//=======================================================================================================
+// Print final output summary
+
+print "countoddthings=" countoddthings " \n"
+print "Finished \n"
