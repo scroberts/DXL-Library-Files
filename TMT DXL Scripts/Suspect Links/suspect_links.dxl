@@ -1,0 +1,340 @@
+// TMT Suspect Links Script
+/* 
+DXL code to display suspect links info for current DRD module - for TMT
+November 2016
+
+Description: 	This DXL script will populate a column in current DRD module with suspect link data.
+		Suspect link info is shown for each object in the module that has any outlinks.
+		A suspect link occurs when the linked parent object text has been modifed after the
+		most recent date that suspect links for this object were cleared.
+		For each suspect link found, this script will show: 
+			The TMT ID of the parent requirement
+			The Object Text of the parent requirement (omitting OLEs and RTF)
+			The date that the parent object text was modified
+		The script populates the attribute named "TMT Suspect Links".
+		That attribute is cleared by this script, so any contents from previous runs will be lost.
+		The script opens (read-only) each parent module that is linked, unless it's already open.
+		The script leaves those linked modules open. This lets the user quickly inspect the linked parents.
+		The user can close the modules later.
+
+Definition:	For the purposes of this script, the definition of a suspect link is...
+		Any outlink from a DRD module that:
+		1. Transits the Satisfies link module
+		2. the last modified date of the parent object is later than the last date this link 
+		   was cleared of suspicion.  
+
+Assumptions:	This script is coded with the following assumptions:
+		1. CR History attribute in DRD contains entries with syntax: 
+			CR###   DD month YYYY		(the CR number is 3 digits long)
+			CR####   DD month YYYY		(the CR number is 4 digits long)
+			ADMIN   DD month YYYY
+			the CR number or "ADMIN" text is followed by 3 spaces
+		2. A few DRD modules contain some very old CR History entries from 2014 that do not match
+		   this syntax.  They are ignored by this script.  This script looks for the 3 spaces.
+
+Notes:		1. This script is intended to be used on a project where very few module attributes are
+		   set to "affect change dates".  For TMT, only 2 attributes will affect change dates:
+			"TMT ID" and "Object Text"
+		   The TMT GitHub library has a dxl script that sets the "affect change dates" this way.
+
+*/
+
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+//=======================================================================================================
+// Check the current module
+
+Module m = current
+if (null m)					// Test if a module is open
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+if (!isEdit current)				// Test if current module is open exclusive edit
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+if (!exists attribute "TMT Suspect Links")	// Check if needed attribute exists
+{
+   ack "TMT Suspect Links attribute not found in this module.  Aborting."
+   halt
+}
+
+
+
+
+//=======================================================================================================
+// Initialize some variables
+
+
+Object o
+int obj_absno
+Link outLink
+Object targetObj
+ModName_ targetMod
+string targetModName
+Module targetModule
+int count = 0
+
+Date parentLastModified
+Date parentLastModified_dateOnly
+Date childLastModified
+Date suspicionClearedFwd
+Date suspicionClearedBck
+
+string targetTMTid
+string targetObjText
+
+string NewText
+string LinkModuleName 		= "/TMT Requirements/Links/Satisfies"
+
+string CRnote
+string targetCRhistory
+string CRhistory_last
+int lenCRhistory, offset, len, CRhistory_last_len
+string possibleDate
+string parentModString
+Date possibleDate_date
+
+Buffer targetObjText_rtf = create()
+Buffer NewText_buf = create()
+
+
+//=======================================================================================================
+// Loop over the objects in this module
+
+for o in m do {
+
+
+
+NewText	= ""				// initialize output text string for this object
+NewText_buf = ""
+obj_absno = o."Absolute Number"
+print "ID=" obj_absno " \n"		// debug output
+
+
+
+//=======================================================================================================
+// Look for any outgoing links from this object - that go through the Satisfies link module
+
+for outLink in o -> LinkModuleName do {
+
+   targetModName = target outLink	// get the target module name string
+   if (null targetModName) {print "targetModName is empty \n" }
+   targetMod = target outLink		// get the target module ref
+   if (null targetMod) {print "targetMod is empty \n" }
+
+   if (open targetMod) {		// check if this linked module is already open
+      // print "     this target module is already open  \n"
+
+   } else { 				// open the module with this link parent
+
+      print "opening module: " targetModName " \n"
+      targetModule = read(fullName(targetMod),true)	// returns a module handle
+
+      if (null targetModule) {
+         print "target module read failed; targetModName=" targetModName " \n"
+         ack "Target module read failed.  Aborting."
+         delete targetObjText_rtf
+         delete NewText_buf
+         halt
+      }
+   }
+
+   targetObj = target outLink		// get the target object number
+   if (null targetObj) {
+      print "targetObj is empty - this will crash \n" 
+      ack "targetObj is empty. This is bad.  Aborting."
+      delete targetObjText_rtf
+      delete NewText_buf
+      halt
+   }
+
+
+   targetTMTid = targetObj."TMT ID"		// get the parent TMT ID
+   targetObjText = targetObj."Object Text"	// get the parent reqt text
+
+print "   targetTMTid=" targetTMTid " \n"
+
+
+   suspicionClearedFwd = outLink."Suspicion Cleared Forwards"		// is type Date
+   suspicionClearedBck = outLink."Suspicion Cleared Backwards"		// is type Date
+
+   if (null suspicionClearedFwd) {print "    suspicionClearedFwd is empty \n" }
+   if (null suspicionClearedBck) {print "    suspicionClearedBck is empty \n" }
+
+   parentLastModified = lastModifiedTime(targetObj)			// type Date, includes day+tme
+   parentLastModified_dateOnly = dateOnly(parentLastModified)		// type Date, just date, no time
+   childLastModified  = lastModifiedTime(o)
+
+   print "    parentLastModified=" parentLastModified " \n"
+   print "    childLastModified =" childLastModified " \n"
+   print "    suspicionClearedFwd=" suspicionClearedFwd "\n"
+   print "    suspicionClearedBck=" suspicionClearedBck "\n"
+
+
+// Check if the parent was modified after this link to it was last cleared of suspicion
+
+   if (parentLastModified > suspicionClearedFwd) {
+      print "    parent modified after fwd suspicion cleared \n"
+
+// Check the CR History to see if the last CR happened on the same date
+
+      CRnote = "NONE"					// initialize to: no matching CR entry found
+
+      targetCRhistory = targetObj."CR History"		// get the parent CR History
+
+      if (!null targetCRhistory) {			// if the CR History field is not empty
+
+         lenCRhistory = length(targetCRhistory)		// CR History might start with CR### or ADMIN
+							// it ends with date from today() command
+
+         if (findPlainText(targetCRhistory,"\n",offset,len,false)) {	// look for newline character
+
+// there is at least 1 newline in the CR history, get the offset of the last one
+
+            if (findPlainText(targetCRhistory,"\n",offset,len,false,true)) {	// look in reverse 
+
+               if (lenCRhistory-offset+1 > 0) {
+
+                  CRhistory_last = targetCRhistory[offset+1:lenCRhistory-1]	// get substring
+
+               } else {
+                  print "ERROR: targetCRhistory too short. Aborting. targetCRhistory=" targetCRhistory "\n"
+                  ack "ERROR: targetCRhistory is too short. Aborting!"
+                  delete targetObjText_rtf
+                  delete NewText_buf
+                  halt
+               }
+            }
+         } else {					// no newline chars in the CR History text
+
+            CRhistory_last = targetCRhistory		// use the entire text string
+         }
+
+
+// at this point, the last cr history entry is in the string CRhistory_last
+// we want to extract the date from that, so it can be compared to the parent last modified date
+//   if it contains 3 spaces ("  "), then it's the proper syntax, just take substring following spaces
+//   if no 3-spaces, then it's very old (2014) and can be ignored because it's older than when
+//   suspicions were cleared for the entire module (end of 2016).
+
+         print "CRhistory_last=" CRhistory_last " \n"
+
+         CRnote = CRhistory_last	// this is for a simpler approach - to just show the last CR entry
+
+         CRhistory_last_len = length(CRhistory_last)
+
+         if (findPlainText(CRhistory_last,"   ",offset,len,false)) {	// look for 3-spaces
+
+            possibleDate = CRhistory_last[offset+3:CRhistory_last_len-1]
+            parentModString = stringOf(parentLastModified_dateOnly)
+
+            print "   possibleDate =" possibleDate "   parentMod=" parentLastModified_dateOnly " \n"
+            possibleDate_date = possibleDate
+            if (possibleDate_date == parentLastModified_dateOnly) {
+               print "     DATES MATCH!  WOW!  \n"
+            }
+
+         } else {			// last CR entry is missing 3-spaces
+
+            print "   3-spaces are missing from last CR entry \n"
+
+         }
+
+
+      } else {						// CR History is empty
+		// do nothing, already set CRnote = NONE
+      }
+
+
+
+// Append this modified parent to the NewText string
+
+      targetObjText_rtf = richTextNoOle targetObj."Object Text"		// get parent text, no OLE objects
+
+      NewText = NewText 						//-
+                "Parent Last Modified: " parentLastModified_dateOnly  	//-
+                "\nLast CR: " CRnote " \n" 				//-
+                targetObjText "\n\n"
+      count++
+
+      NewText_buf = NewText_buf 					//-
+                "Parent Last Modified: " parentLastModified_dateOnly  	//-
+                "\nLast CR: " CRnote " \n" 				//-
+                targetObjText_rtf "\n\n"
+
+
+   }
+
+
+// I suspect that I don't need suspicion cleared backwards.  i think i can drop this code
+//
+//   if (parentLastModified > suspicionClearedBck) {
+//      print "parent modified after back suspicion cleared \n"
+//      NewText = NewText "Parent Last Modified: " parentLastModified "\n" targetObjText "\n\n"
+//   }
+
+
+// Below is a trivial test for suspect link, but ignores the act of clearing suspect links
+//
+//   if (parentLastModified > childLastModified) {
+//      print "    parent modified after child last modified \n"
+//      NewText = NewText "Parent Last Modified: " parentLastModified "\n" targetObjText "\n\n"
+//   }
+
+
+
+}		// end of loop over outlinks
+
+
+
+
+//=======================================================================================================
+// Populate the "TMT Suspect Links" attribute for this object
+
+
+//debug-test-new-version-below		o."TMT Suspect Links" = NewText
+
+o."TMT Suspect Links" = richText NewText_buf
+
+
+
+
+}		// end of loop over objects
+
+
+refresh(m)			// refresh the window showing this module so these changes are visible
+
+
+//=======================================================================================================
+// End by suggesting the user switch to the TMT Suspect Links View (unless it's already up)
+
+
+string thisView = currentView(m)
+if (thisView != "TMT Suspect Links View") {
+   ack "Switch to the TMT Suspect Links view to see the updates."
+//   load view "TMT Suspect Links View"		// change the suspect links view
+// don't do the above line unless you first check if that view exists
+
+}
+
+
+
+//=======================================================================================================
+// Clear memory (becuase DXL is not good at memory management)
+
+delete targetObjText_rtf		// delete the buffer used to preserve RTF text in the parent
+delete NewText_buf
+
+
+
+//=======================================================================================================
+// Print final output summary
+
+
+print count " objects were updated. \n"
+print "Finished \n"
