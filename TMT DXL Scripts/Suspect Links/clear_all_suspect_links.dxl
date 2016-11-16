@@ -52,7 +52,9 @@ int linkcount = 0
 string LinkModuleName = "/TMT Requirements/Links/Satisfies"
 
 
-for o in m do {					// loop over all objects in this module
+for o in entire m do {					// loop over all objects in this module
+
+   if ( isDeleted(o) ) continue			// skip this object if it is deleted
 
    for outLink in o -> LinkModuleName do {	// loop over all outlinks going thru Satisfies link module
 
