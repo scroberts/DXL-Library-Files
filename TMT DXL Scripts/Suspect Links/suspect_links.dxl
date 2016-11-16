@@ -106,9 +106,9 @@ Buffer NewText_buf = create()
 //=======================================================================================================
 // Loop over the objects in this module
 
-for o in m do {
+for o in entire m do {
 
-
+if ( isDeleted(o) ) continue		// skip this object if it is deleted
 
 NewText	= ""				// initialize output text string for this object
 NewText_buf = ""
