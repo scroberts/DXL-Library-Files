@@ -171,9 +171,9 @@ print "   targetTMTid=" targetTMTid " \n"
    childLastModified  = lastModifiedTime(o)
 
    print "    parentLastModified=" parentLastModified " \n"
-   print "    childLastModified =" childLastModified " \n"
+//   print "    childLastModified =" childLastModified " \n"
    print "    suspicionClearedFwd=" suspicionClearedFwd "\n"
-   print "    suspicionClearedBck=" suspicionClearedBck "\n"
+//   print "    suspicionClearedBck=" suspicionClearedBck "\n"
 
 
 // Check if the parent was modified after this link to it was last cleared of suspicion
@@ -256,35 +256,14 @@ print "   targetTMTid=" targetTMTid " \n"
 
       targetObjText_rtf = richTextNoOle targetObj."Object Text"		// get parent text, no OLE objects
 
-      NewText = NewText 						//-
-                "Parent Last Modified: " parentLastModified_dateOnly  	//-
-                "\nLast CR: " CRnote " \n" 				//-
-                targetObjText "\n\n"
       count++
 
       NewText_buf = NewText_buf 					//-
-                "Parent Last Modified: " parentLastModified_dateOnly  	//-
-                "\nLast CR: " CRnote " \n" 				//-
+                "Parent Last Modified by CR: " CRnote  "\n"		//-
                 targetObjText_rtf "\n\n"
 
 
    }
-
-
-// I suspect that I don't need suspicion cleared backwards.  i think i can drop this code
-//
-//   if (parentLastModified > suspicionClearedBck) {
-//      print "parent modified after back suspicion cleared \n"
-//      NewText = NewText "Parent Last Modified: " parentLastModified "\n" targetObjText "\n\n"
-//   }
-
-
-// Below is a trivial test for suspect link, but ignores the act of clearing suspect links
-//
-//   if (parentLastModified > childLastModified) {
-//      print "    parent modified after child last modified \n"
-//      NewText = NewText "Parent Last Modified: " parentLastModified "\n" targetObjText "\n\n"
-//   }
 
 
 
