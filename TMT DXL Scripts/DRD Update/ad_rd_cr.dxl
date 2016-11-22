@@ -372,9 +372,12 @@ for o in m do {
          {
             newtext = newtext "\n\tCAD Drawing No: " CADDocumentNo
 
-            if (!null DocumentRev) 		// add the rev for this drawing, if it exists
+            if ( ADorRD == "AD" )		// add rev info for ADs, not RDs
             {
-               newtext = newtext "  Rev " DocumentRev
+               if (!null DocumentRev) 		// add the rev for this drawing, if it exists
+               {
+                  newtext = newtext "  Rev " DocumentRev
+               }
             }
          }
 
