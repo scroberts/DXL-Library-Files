@@ -1,0 +1,74 @@
+// Reset Suspicion on All Outlinks
+/* 
+Reset Suspicion on All Outlinks
+November 2016
+
+ Description: 	This DXL script will reset the value for clearing suspect links forward on all existing
+		links in the current module.  All values are set to the current date & time.
+		This is a fast way to clear all suspect links (forward only).
+
+		This will reset the date comparison made by DOORS when spotting suspect links.
+		A new suspect outlink will only show up if the parent has changed AFTER this date.
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The user must have the DRD module open with edit access.
+		2) The script only examines links that go through the link module named
+			"/TMT Requirements/Links/Satisfies".
+		   This means that it is ignoring links to the Documents Register.
+
+ Directions:	1) open the module you want to edit
+		2) in that module window, select menu item: Tools / Edit DXL...
+		3) paste this script code into the dialog window and click "Run"
+
+		1a) from the DRD module window, select the menu item: 
+			TMT DXL Scripts / Suspect Links / Clear Suspect Links - All Outlinks
+
+*/
+
+
+//=======================================================================================================
+// Check the current module
+
+Module m = current
+if (null m)					// Test if a module is open
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+if (!isEdit current)				// Test if current module is open exclusive edit
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+
+
+//=======================================================================================================
+// Initialize some variables
+
+Object o
+Link outLink
+int linkcount = 0
+string LinkModuleName = "/TMT Requirements/Links/Satisfies"
+
+
+for o in entire m do {					// loop over all objects in this module
+
+   if ( isDeleted(o) ) continue			// skip this object if it is deleted
+
+   for outLink in o -> LinkModuleName do {	// loop over all outlinks going thru Satisfies link module
+
+      outLink."Suspicion Cleared Forwards" = dateAndTime(today)
+      linkcount++
+
+   }						// end of loop over outlinks
+
+}						// end of loop over objects
+
+
+
+//=======================================================================================================
+// Print final output summary
+
+print linkcount " links were updated (forward suspicion reset to today). \n"
+print "Finished \n"
