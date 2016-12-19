@@ -80,6 +80,7 @@ ModName_ targetMod
 string targetModName
 Module targetModule
 int count = 0
+bool specialcase
 
 Date parentLastModified
 Date parentLastModified_dateOnly
@@ -178,10 +179,35 @@ print "   targetTMTid=" targetTMTid " \n"
    print "    suspicionClearedBck=" suspicionClearedBck "\n"
 
 
+// Check if NULL fwd suspicion cleared date  AND  if the child was modified after the parent
+// This sort of thing happens when a new link is created or a new requirement is added
+// Since the child was modified after the parent, this script will skip this object
+// and it will reset the fwd suspicion date to today.
+
+   if (null suspicionClearedFwd && childLastModified > parentLastModified) {
+      print "      skipping this because suspicionClearedFwd is empty AND child mod after parent mod \n"
+      print "      also resetting the suspicion forward to today \n"
+      outLink."Suspicion Cleared Forwards" = dateAndTime(today)
+      continue			// jump to the next outLink for this object
+   }
+
+// Check if NULL fwd suspicion cleared date  AND  parent modified after the child
+// Again, this can result from a new reqt or a new link.  But since the parent was modifed afterward
+// then let's treat it as a suspect link.  NOTE: this might not agree with the DOORS reporting of suspect links.
+// When the user believes this module is consistent with linked parents, then they run the other DXL script
+// named clear_all_suspect_links.dxl.  That script will reset all suspect links by setting 
+// suspicionClearedFwd to today's date.  So it will no longer be null.
+
+   specialcase = false
+   if (null suspicionClearedFwd && parentLastModified > childLastModified) {
+      specialcase = true
+      print "      specialcase: suspicionFWD = empty AND parent modified after child last modified \n"
+   }
+
 // Check if the parent was modified after this link to it was last cleared of suspicion
 
-   if (parentLastModified > suspicionClearedFwd) {
-      print "    parent modified after fwd suspicion cleared \n"
+   if (parentLastModified > suspicionClearedFwd || specialcase) {
+      print "    parent modified after fwd suspicion cleared (or specialcase) \n"
 
 // Check the CR History to see if the last CR happened on the same date
 
