@@ -144,7 +144,7 @@ for o in m do {					// Step through the objects in this module
       continue
    }
 
-   if (oleIsObject(o) && obj_text == "") 	// does obj contain only an OLE object
+   if (oleIsObject(o)) 	// does obj contain only an OLE object
    {						// if so, call it an image
       o."IsReq" = false
       o."Paragraph Style" = "<Object Text:Image>"
@@ -153,9 +153,9 @@ for o in m do {					// Step through the objects in this module
    }
 
    if (obj_number < "3") 		// is this object in the intro sections 1 or 2
-   {					// set paragraph style to reqt only to get the left indent
+   {					// set paragraph style to normal since there should be no requirements or discussions in section 1 or 2
       o."IsReq" = false
-      o."Paragraph Style" = "<Object Text:Requirement>"
+      o."Paragraph Style" = "<Object Text:Normal>"
 
       continue
    }
