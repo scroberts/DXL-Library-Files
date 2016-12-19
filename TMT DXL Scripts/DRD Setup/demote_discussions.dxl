@@ -1,0 +1,394 @@
+// Demote Discussions
+/* 
+Demote discussion objects so they are subordinate to the preceding requirement.
+
+Description: 	This DXL script automatically demotes discussion objects so they are subordinate
+		to the preceding requirement object.  It also demotes figures and tables. 
+		Sections 1 & 2 are ignored.  This script is best run on a new module, with no view
+		filters and no CR items.  Afterward, the hierarchy can be maintained manually.
+		
+Process:	This is the logic used to identify objects in the module:
+		1) Requirements: object text starts with "[REQ-"
+		2) Discussions: object text starts with "Discussion:"
+		3) Figure Captions: object text starts with "Figure"
+		4) Table Captions: object text starts with "Table"
+		5) Headers: object heading is not empty
+		6) DOORS tables: uses the cell(), row(), and table() functions
+		7) intro sections: object number < "3"
+		8) new objects (pending CR items): object text starts with "new"
+
+		- DOORS table cells are ignored
+		- All discussions, figures, tables, images that follow a requirement are
+		  demoted to be subordinate to that requirement.
+		- Objects that follow a header (before the 1st reqt in that section) are
+		  not demoted. Some sections have such preamble material.
+		- New objects (#8 above) are ignored and not demoted. 
+		  Warning: if a new object is in between a requirement and a discussion, then
+		  the discussion will not be demoted below the requirement that precedes the new obj.
+		  The script does not try to distinguish between new reqts and new discussions.
+
+Assumptions:	The script requires the following conditions to function properly:
+		1) The user has opened the desired module in exclusive edit mode.
+		2) The pattern matching described in the preceding section is important. For example,
+		   If a requirement has an extra space at the beginning (e.g., " [REQ-")
+		   then that will not be seen as a requirement.
+	
+Directions:	1) Open the desired DRD module in exclusive edit mode
+		2) In that module window, select menu item: Tools / Edit DXL...
+		3) Paste this script code into the dialog window and click "Run"
+
+Notes:		1) The script does not save the module, the user should review the changes and 
+		   save the module if satisfied.
+		2) If the script can't identify the object, then it will skip that object
+		   and report it in the printed output (in the DXL window).
+		3) Some DRD modules appear to contain different prefix words in the Object Text.
+		   In addition to "[REQ-" and "Discussion:" and "Table" and "Figure"
+			"Verification:"
+			"Reference:"
+			"Source:"
+			"SENotes:"
+			"Deleted:"
+		   These objects will be treated like continuations of the preceding requirement or
+		   discussion. They may (or may not) be demoted by the script. If desired, the script
+		   can be modified to directly handle these options.
+
+Warnings:	1) This is a dangerous script because it uses the "move" command to demote objects
+		   to be subordinate to the most recent requirement.  If the script gets confused
+		   and has misidentified the most recent requirement (the desired parent), then
+		   objects will be moved to undesirable and unrelated locations.  This means that
+		   the results will be confusing and messy.  This situation might be very difficult
+		   to recover from.  It is important to review the results before saving the module.
+		   Only save the module if you are satisfied with the results.
+		2) This script will turn off any view filters, otherwise the module will get messed up.
+		   A filter can result in a requirement followed by a discussion from a later section.
+		   But this script will move that discussion to be below that requirement in an earlier
+		   section of the module. This would make a big mess of things.	
+		3) This script is best run on a DRD module that has no pending CRs, and so there are no
+		   objects with empty Object Text (but have CR Text content). If there is a pending CR,
+		   then the blank objects will be treated like a continuation of whatever preceded it
+		   (requirement, discussion, etc). That blank object may (or may not) get demoted to
+		   below the preceding object and that can affect the sequence of the objects and thus
+		   disturb the intended object placement by the CR author.		
+
+
+*/
+
+pragma runLim, 0				// suppress DXL execution timeout
+
+// ====================================================================================================
+// Check the module
+
+Module m = current
+if (null m)					// Test if any module is open
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)				// Test if current module is open exclusive edit
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+if (filtering m) 				// turn off any filters that are currently set
+{
+   ack "Your filters will be turned off so all objects can be processed.\nOtherwise the module will get messed up!"
+   filtering false
+}
+
+
+// ====================================================================================================
+// Define some variables		
+
+Object o 
+Object parent_reqt
+Object obj_parent
+string obj_text
+string obj_header
+string obj_number
+string obj_absno
+string prev_obj = ""
+int count = 0
+int count_demoted = 0
+int count_noneed = 0
+int count_discussions = 0
+int count_odd = 0
+int count_table = 0
+int count_new = 0
+bool now_demoting = false
+string tempstring
+
+
+// ====================================================================================================
+// Process the module
+
+for o in m do {					// Step through the objects in this module
+
+   count++
+   obj_text = o."Object Text"			// get the object text in string format (no rich text)
+   obj_header = o."Object Heading"
+   obj_absno = o."Absolute Number"
+   obj_number = number(o)			// is a string, e.g. 1.4-2-5 
+
+   obj_parent = parent o			// get the hierarchical parent of this object
+
+
+   if (obj_number < "3") 			// is this object in the intro sections 1 or 2
+   {						// do nothing to these sections
+      continue
+   }
+   if (cell(o) || row(o) || table(o))		// is this object in a DOORS table
+   {						// skip table cells
+      count_table++
+      continue
+   }
+
+
+   if (obj_text[0:4] == "[REQ-")		// is this object a requirement
+   {
+
+      prev_obj = "requirement"			// remember having seen a reqt
+      parent_reqt = o				// remember this obj for use later
+      now_demoting = true			// start demoting things - but NOT this reqt
+
+      continue
+   }
+
+   if (obj_text[0:10] == "Discussion:")		// is this object a discussion
+   {
+
+      count_discussions++
+
+      if (now_demoting)				// are we in a demoting state
+      {
+         tempstring = parent_reqt."Absolute Number"
+         print "demoting discussion " obj_absno "   below " tempstring " \n"
+
+// Test to see if this object is already the child of the desired parent (hierarchical child, not links)
+// because DOORS issues errors if you "move" it to where it already is, then dies if too many errors.
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      prev_obj = "discussion"
+
+      continue
+   }
+
+   if (obj_text[0:5] == "Figure")		// is this object a figure caption
+   {
+      
+
+      prev_obj = "figure caption"
+      if (now_demoting)
+      {
+         print "demoting figure caption " obj_absno " \n"
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      continue
+   }
+
+   if (obj_text[0:4] == "Table")		// is this object a table caption
+   {
+      
+
+      prev_obj = "table caption"
+      if (now_demoting)
+      {
+         tempstring = parent_reqt."Absolute Number"
+         print "demoting table caption " obj_absno " below " tempstring " \n"
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      continue
+   }
+
+   if (obj_header != "")			// is this object a header
+   {
+
+      prev_obj = "header"
+      now_demoting = false			// stop demoting things
+
+      continue
+   }
+
+   if (oleIsObject(o) && obj_text == "") 	// does object contain only an OLE object
+   {						// if so, call it an image & demote it
+
+      prev_obj = "image"
+      if (now_demoting)
+      {
+         print "demoting OLE " obj_absno " \n"
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      continue
+   }
+
+   if (obj_text[0:2] == "new")			// is this object marked as "new"
+   {
+      count_new++
+      print "new obj " obj_absno " \n"
+      now_demoting = false			// stop demoting things
+      prev_obj = "new
+"
+      continue
+   }
+
+
+
+
+
+
+// This object was none of the above choices, therefore it is likely to be a continuation 
+// of the previous object.  Assume continuation if the previous obj was a reqt or discussion.
+// Otherwise, skip this object.  It can be domoted manually, if needed.
+
+
+   if (prev_obj == "requirement") 			// assume continuation of this reqt
+   {
+      	// do nothing here - do not demote the continuation of a requirement
+
+      print "requirement continuation " obj_absno "  -- moving the parent to here. \n"
+      prev_obj = "requirement"
+
+// MIGHT WANT TO reset the parent object here: 
+// make this the new parent reqt so any demotions after it are sub to this, not the old parent
+      parent_reqt = o
+
+      continue
+   }
+
+   if (prev_obj == "discussion") 			// assume continuation of this discussion
+   {
+      
+	// continue the discussion, so demote this object also
+
+      prev_obj = "discussion"
+      if (now_demoting)
+      {
+         print "demoting discussion continuation " obj_absno " \n"
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      continue
+   }
+
+   if (prev_obj == "table caption") 			// assume continuation of table material
+   {
+      
+	// demote extended data following table caption if it's unrecognized
+
+      if (now_demoting)
+      {
+         print "demoting table caption continuation " obj_absno " \n"
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      continue
+   }
+
+   if (prev_obj == "figure caption") 			// assume continuation of figure material
+   {
+      
+	// demote extended data following figure if it's unrecognized
+
+      if (now_demoting)
+      {
+         print "demoting figure caption continuation " obj_absno " \n"
+
+         if (parent_reqt == obj_parent) {
+            print " ### this obj already has the correct parent, will skip this \n"
+            count_noneed++
+         } else {
+
+            move (o, last below parent_reqt)	// move this obj to be the last child under the parent
+            count_demoted++
+         }
+      }
+
+      continue
+   }
+
+
+
+
+   print "Unidentified object skipped: " obj_absno "   Might require manual demotion. \n"
+   count_odd++
+
+
+}						// end of loop over objects in the module
+
+ack "Remember to review the changes before saving the module.\nThis script is dangerous and can " //-
+	"really mess up the module."
+
+
+// ====================================================================================================
+// Finish up
+
+// Refresh the display to show the new hierarchy.  Problem is: this doesn't always work.
+// So also tell the user to refresh - that seems to work reliably.
+
+refresh(m)		
+ack "Please refresh the display using menu: View / Refresh (F5)."
+
+
+print count " objects were processed. \n"
+print count_discussions " discussions were seen. \n"
+print count_demoted " objects were demoted. \n"
+print count_noneed " objects were already demoted. \n"
+print count_table " objects were seen in tables and were skipped. \n"
+print count_new " new objects were seen and were skipped. \n"
+print count_odd " objects were not recognized and were skipped. \n"
+
+print "Finished. \n"
