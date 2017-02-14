@@ -97,11 +97,11 @@ for l in all(obj <- (NLS_("*"))) do {
       if ((!null s) && (null cistrcmp( (oSource.s_attr_milestone ""), s_milestone )) ) {
         if (null cistrcmp( ( s_VA_info_to_display ""), "Method" )) { // if info to be displayed is the mothod
           // since dxl doesn't seem to have a switch/case statement, there is just a list of if statements
-          if (null cistrcmp( (oSource.s_attr_method ""), "Design") )        { display "D" (NLS_("")) }
-          if (null cistrcmp( (oSource.s_attr_method ""), "Test") )          { display "T" (NLS_("")) }
-          if (null cistrcmp( (oSource.s_attr_method ""), "Data Analysis") ) { display "A" (NLS_("")) }
-          if (null cistrcmp( (oSource.s_attr_method ""), "Inspection") )    { display "I" (NLS_("")) }
-          if (null cistrcmp( (oSource.s_attr_method ""), "Demonstration") ) { display "M" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "D") )        { display "D" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "T") )          { display "T" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "A") ) { display "A" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "I") )    { display "I" (NLS_("")) }
+          if (null cistrcmp( (oSource.s_attr_method ""), "M") ) { display "M" (NLS_("")) }
         }
         if (null cistrcmp( ( s_VA_info_to_display ""), "Name" )) { // if info to be displayed is the mothod
           display oSource."Object Short Text"
