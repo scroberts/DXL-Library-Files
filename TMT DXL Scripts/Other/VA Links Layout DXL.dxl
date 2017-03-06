@@ -1,0 +1,63 @@
+/* 
+ Populate the VA Links attribute in the DRD modules - for TMT
+ March 2017
+
+ Version: 2
+
+ Description: 	This Layout DXL script populates the VA Links attribute in DRD modules.
+		The VA Links attribute is filled with 1 line of text per linked VA.
+		Each line contains 4 fields: VA ID, VA Name, VA Method, VA Milestone
+		Example of the desired VA Links contents:
+			[VA-2-ENC-8] List of Standards [D] [SM FDR]
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The verification link module is: "/TMT Requirements/Links/Verification"
+  
+*/
+
+string LinkModuleVAs = "/TMT Requirements/Links/Verification"
+
+string NewText = ""
+bool firstLink = true
+Link inLink
+Object sourceObj
+
+string VA_ID = ""
+string VA_Name = ""
+string VA_Method = ""
+string VA_Milestone = ""
+
+
+// Loop over all incoming links from the verification link module
+
+for inLink in obj <- LinkModuleVAs do	
+{
+
+// Get the source for this link
+
+   sourceObj = source inLink			// get the source object number
+
+
+// Get the string values from the source module
+   
+   VA_ID = identifier(sourceObj)
+   VA_Name = sourceObj."Object Text"
+   VA_Method = sourceObj."VA Method"
+   VA_Milestone = sourceObj."VA Milestone"
+
+// Add this link info to the end of the NewText string
+
+   if ( firstLink ) 
+   {
+      NewText = "[" VA_ID "] " VA_Name " [" VA_Method "] [" VA_Milestone "]"
+      firstLink = false
+
+   } else {
+   
+      NewText = NewText "\n[" VA_ID "] " VA_Name " [" VA_Method "] [" VA_Milestone "]"
+
+   }
+
+}
+
+display NewText ""
