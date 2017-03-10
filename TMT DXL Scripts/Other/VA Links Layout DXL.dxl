@@ -2,7 +2,7 @@
  Populate the VA Links attribute in the DRD modules - for TMT
  March 2017
 
- Version: 2
+ Version: 3
 
  Description: 	This Layout DXL script populates the VA Links attribute in DRD modules.
 		The VA Links attribute is filled with 1 line of text per linked VA.
@@ -12,8 +12,12 @@
 
  Assumptions:	The script requires the following conditions for proper function:
 		1) The verification link module is: "/TMT Requirements/Links/Verification"
+		2) The user must have read access to the VAM modules
+		   The modules don't need to be open. 
+		   If not open, then they are opened in the background - but not displayed.
   
 */
+pragma runLim, 0
 
 string LinkModuleVAs = "/TMT Requirements/Links/Verification"
 
@@ -21,6 +25,8 @@ string NewText = ""
 bool firstLink = true
 Link inLink
 Object sourceObj
+LinkRef lr
+ModName_ sourceMod
 
 string VA_ID = ""
 string VA_Name = ""
@@ -28,7 +34,20 @@ string VA_Method = ""
 string VA_Milestone = ""
 
 
-// Loop over all incoming links from the verification link module
+// Check all inlinks: if the source module is not open, then load it
+
+for lr in all(obj<-LinkModuleVAs) do {
+   sourceMod = module (sourceVersion lr)
+   if (!null sourceMod) {
+      if ((!isDeleted sourceMod) && (null data(sourceVersion lr))) {
+         load((sourceVersion lr),false)
+      }
+   }
+}
+
+
+
+// Loop over all incoming links from the verification link module to this obj
 
 for inLink in obj <- LinkModuleVAs do	
 {
