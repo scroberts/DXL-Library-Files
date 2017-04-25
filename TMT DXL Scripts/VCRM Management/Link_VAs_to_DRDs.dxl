@@ -1,0 +1,555 @@
+// Link VAs to DRD Requirements
+/* 
+ Link VAs in current view to cited DRDs in the "Requirement IDs Verified" field.
+ March 2017
+
+ Version: 1
+
+ Description: 	This DXL script links VAs to their associated DRD requirements.
+		The script is run by the user from the VAM module by selecting the script
+		from the TMT DXL menu tree. The script reads the contents of the
+		"Requirement IDs Verified" attribute and creates links to all specified 
+		reqts. The script first deletes any existing links to any DRD, this allows 
+		the user to manage the linked reqts by simply editing the text in the 
+		"Requirement IDs Verified" field.
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The script honors the user's current view filter settings, and it will only
+		   operate on the objects that are visible when the script is run. This lets
+		   the user run the script on a subset of the VAs.
+		2) The verification link module is: "/TMT Requirements/Links/Verification"
+		3) The assumed delimiter character in the list of REQ IDs is set in the code
+		   variable "delim_char" to be a comma.
+		4) The script assumes the DRDs are located in the specified DOORS folders. 
+			- See the array below
+			- Only these folders are searched to find the DRD being cited.
+		5) Any given VAM will want all of its VAs linked to a single DRD module.
+			- The script looks for the target DRD module based on the first ID cited
+			  by the first VA that cites reqts.
+			- The script then assumes that all links defined in this manner will
+			  link to the same DRD module.
+		6) The max number of Reqt IDs verified by any one VA is 100.
+			- I had to declare a fixed-size array to avoid a run-time error.
+		7) The DRD module name contains the text string inside the TMT ID of its reqts.
+		   The only deviations to this are:  (dxl code below handles these)
+			TMT ID: "M1CS.ACT" --> DRD module: "M1CS Actuator"
+			TMT ID: "M1CS.SEN" --> DRD module: "M1CS Sensor"
+
+ Notes:		1) Errors creating the links are not currently trapped. They will appear and
+		   may cause the script to stop. However, link creation will only be attempted
+		   if the target module and object are found.
+		2) The code contains many debug print statements (commented out).
+		   These can be selectively uncommented to troubleshoot any future issues.
+  
+*/
+
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+
+string LinkModuleVAs = "/TMT Requirements/Links/Verification"
+			
+
+string DRD_Folders[] = {"/TMT Requirements/Level 0 Requirements", //-
+			"/TMT Requirements/Level 1 Requirements", //-
+			"/TMT Requirements/Level 2 Requirements", //-
+			"/TMT Requirements/Level 3 Requirements"}
+
+string delim_char = ","			// delimiter char used in list of Req IDs
+
+
+
+
+//=======================================================================================================
+// Subroutine Definition
+
+// Extracts the first Reqt ID from the given list, using the given delimiter.
+//   The variable list is a string of Reqt IDs separated by the delimiter character.
+// Returns: firstID = ""   when there is no Reqt IDs in the given list
+//          leftover = ""  when there is nothing after the last delimiter character
+
+
+// Output variables defined here so they have global scope and this subroutine can use them
+
+string firstID
+string leftover
+
+void GetFirstID (string list, string delimiter)
+{
+   int thisoffset
+   int thislen
+   int lenlist
+   string before_delim
+
+// The regexp below is for TMT ID syntax
+// The period "\\." is only to accommodate L3 M1CS.ACT and M1CS.SEN
+
+   Regexp reqtID_re = regexp2 "REQ-[0-3]-[A-Z0-9\\.]+-[0-9]+"
+
+   firstID  = ""	// initialize result
+   leftover = ""	// initialize result
+
+   lenlist = length(list)
+   if (lenlist < 1) { return }
+//print "Debug GetFirstID: list=" list " \n"
+
+   if (findPlainText(list,delimiter,thisoffset,thislen,false)) {
+//print "Debug GetFirstID: delimiter found \n"
+
+      before_delim = list[0:thisoffset-1]
+      leftover = list[thisoffset+1:]	// maybe delete this line of code??
+
+// **** maybe replace the next line - regexp - with code that simply
+// **** takes the first part (up to the delim, then trims the whitespace from that)
+// **** using the regexp was intended to make it easy to trim whitespace
+
+      if (reqtID_re before_delim) 
+      {
+
+         firstID = before_delim[match 0]
+//print "Debug GetFirstID: regexp matched, firstID=" firstID "   before_delim=" before_delim " \n"
+         if (lenlist > thisoffset+1) 
+         {	
+            leftover = list[thisoffset+1:lenlist-1]
+         }
+      }
+   
+   } else			// no delimiter char was seen in the list
+   {				// there still might be an ID, so look
+//print "Debug GetFirstID: no delim found, checking for an ID anyway \n"
+      if (reqtID_re list)
+      {
+//print "Debug GetFirstID: no delim found - regexp matched \n"
+         firstID = list[match 0]
+      }
+   }
+}
+
+
+//=======================================================================================================
+// Subroutine Definition
+
+// Trims the whitespace from the beginning and end of the given string.
+// Returns: the trimmed string
+//          "" if no non-whitespace string remains
+
+
+string trimWhiteSpace (string s)
+{
+int first = 0
+int last = ( length s ) - 1
+
+// Find the last char that is not whitespace
+
+while ( last > 0 && isspace( s[last] ) ) last--
+
+// Find the first char that is not whitespace
+
+while ( isspace( s[first] ) && first < last ) first++
+
+if ( first == last && isspace s[first] ) return ""
+
+return s[first:last]
+
+}
+
+
+
+//=======================================================================================================
+// Subroutine Definition
+
+// Loop over the "items" in a given folder.
+//       if the item is a folder, then recursively process that folder
+//       if the item is a formal module, then process that:
+//          test if this string (citedMOD) is in the module name
+//          if a match, then open it and jump out of the recursive stack
+
+
+// Variables defined here so they have global scope and this subroutine can use them
+
+bool 	FoundModule = false
+string 	citedMOD
+Module 	m_DRD
+string 	m_DRD_name
+
+void loopThroughFolder (Folder f)
+{
+   Module mod = null
+   Item i
+   string thisMOD_name
+   int offset, len
+
+   if (null f) { return }
+
+   if (FoundModule) {return}			// bail out if module already found
+
+   for i in f do				// loop over all items in the folder
+   {
+      if (isDeleted(i)) {continue}		// skip deleted items
+
+      if (type(i) == "Folder") {		// recursively dive into any folder
+
+         loopThroughFolder(folder(i))
+
+      } else if (type(i) == "Formal") {		// this is a formal module
+
+         thisMOD_name = name(i)			// get module name (string)
+         if (findPlainText(thisMOD_name,citedMOD,offset,len,false)) {
+            FoundModule = true
+            m_DRD_name = thisMOD_name		// remember the module name string
+            m_DRD = read(fullName(i), false)	// open the module, read-only
+
+            break				// jump out of "for i" loop
+         }
+      }
+   }
+}
+
+
+
+
+//=======================================================================================================
+//=======================================================================================================
+// MAIN CODE
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+
+if (!isEdit current)					// check if user can edit this module
+{
+   ack "This module is NOT opened for edit.  Aborting."
+   halt
+}
+
+if (!exists attribute "Requirement IDs Verified")	// Check if needed attribute exists
+{
+   print "Attribute [Requirement IDs Verified] does not exist.  Aborting. \n"
+   ack "Attribute [Requirement IDs Verified] does not exist.  Aborting."
+   halt
+}
+
+
+
+//=======================================================================================================
+// Check if the stated link module exists in the current project
+
+ModName_ LinkModule = module(LinkModuleVAs)		// convert module name to module handle
+if ( exists(ModName_ LinkModule) )			// exists - needs a module handle
+{
+   print "Link module found. \n"
+} else
+{
+   ack "Specified link module does not exist: " LinkModuleVAs " Aborting. \n"
+   halt
+}
+
+
+//=======================================================================================================
+// Initialize some variables
+
+Object o 
+string Req_IDs_Verified
+Link outLink
+Object DRDobj
+countDeletedLinks    = 0
+countCreatedLinks    = 0
+countSkipped         = 0
+countReqtsFound      = 0
+countReqtsNotFound   = 0
+
+int lenReqIDs
+int offset
+string thisID
+int lenThisID
+int NumIDsFound
+int iStart, iEnd
+string FoundReqIDs[100]		// this is an experiment: setting 100 max Reqts to be verified by any 1 VA
+int i, ifolder
+string useThis, theFirstID, remainingText
+string thisMOD_name, thisTMTid, thisTMTid_trimmed
+
+
+bool FirstModuleSearch = true
+Folder thisFolder
+bool FoundCitedReqt
+
+
+int numFolders = sizeof DRD_Folders
+
+// The regexp below is for TMT ID syntax
+//    The period "\\." is only to accommodate L3 M1CS.ACT and M1CS.SEN
+
+Regexp reqID_re = regexp2 "REQ-[0-3]-[A-Z0-9\\.]+-[0-9]+"
+
+// The regexp below is for TMT DRD module name substring
+//    For example, SRD or M1CS or M3S or ENC
+
+Regexp reqMOD_re = regexp2 "[A-Z0-9]+"		// currently, this re is unused
+
+
+
+//=======================================================================================================
+// Loop over all visible objects in the current module (VA module)
+
+
+print "Looping over VAs...  \n"
+for o in m do {					// this loop honors current view filters
+
+//print "Debug: START NEW VA OBJECT ...... \n"
+
+// Delete any existing outlinks from this VA going through the VA link module
+
+   for outLink in o -> LinkModuleVAs do
+   {
+      countDeletedLinks++
+      delete outLink
+//print "Debug: outlink to be deleted here \n"
+   }
+   flushDeletions
+
+
+// Get the contents of the attribute "Requirement IDs Verified"
+
+   Req_IDs_Verified = ""
+   Req_IDs_Verified = o."Requirement IDs Verified"
+   NumIDsFound = 0
+
+//print "Debug: Req_IDs_Verified=" Req_IDs_Verified " \n"
+
+
+// If Req_IDs_Verified is empty, then skip this line and get the next VA.
+//   In this case, the user wants no links from this VA, and we just deleted any that existed.
+
+   if ( Req_IDs_Verified == "" ) { continue }
+
+
+// Look for any valid REQ IDs in the field
+
+   if (reqID_re Req_IDs_Verified) 			// use regexp to spot an ID
+   {
+      thisID = Req_IDs_Verified[match 0]		// extract the first REQ ID
+
+//print "Debug: this VA cites at least one valid Reqt ID \n"
+
+   } else						// no pattern match, no valid IDs found
+   {
+      print "WARNING: REQ ID syntax not matched; Req_IDs_Verified=" Req_IDs_Verified "   Skipping. \n"
+      continue						// jump to the next VA
+   }
+
+
+// Extract the list of Req IDs from the attribute string - put into array FoundReqIDs
+
+   lenReqIDs = length(Req_IDs_Verified)
+   if (findPlainText(Req_IDs_Verified,delim_char,offset,len,false)) {	// look for delimiter
+
+      useThis = Req_IDs_Verified			// start with the whole string of IDs
+      firstID = ""
+      leftover = ""
+
+      while (true)
+      {
+
+         GetFirstID (useThis, delim_char)		// extract the first ID in this string
+
+//print "Debug GetFirstID output: firstID=" firstID "  leftover=" leftover " \n"
+
+         if (firstID != "") 				// yay, it found an ID
+         {
+//print "Debug: GetFirstID found firstID=" firstID " \n"
+            FoundReqIDs[NumIDsFound] = firstID
+            NumIDsFound++
+     
+            useThis = leftover				// prepare to repeat on the remaining text
+         }	
+         if (firstID == "") { break }
+         if (leftover == "") { break }
+      }
+
+   } else {					// no delim char found, so there's only 1 Req ID
+      NumIDsFound = 1
+      FoundReqIDs[0] = thisID
+      //print "Debug: No delim char, so only 1 ID found:" thisID " \n"
+   }
+
+//   print "Debug:      for this VA, NumIDsFound=" NumIDsFound " \n"
+
+   if ( NumIDsFound < 1 )
+   {
+      //print "No IDs found for this VA.  \n"
+      continue					// go get the next VA
+   }
+
+
+// ID the DRD module that this cited Reqt is in, based on the syntax: REQ-#-ABCD*
+//   Need to ID the module so we can open that module (read-only) to create a link into it.
+//   Perform this search on the first ID in the list - for the first VA with cited IDs, 
+//   then assume all IDs point to the same module.  This assumption makes the code easier 
+//   and faster.
+
+//      Must handle special cases:
+//      If thisID contains "M1CS.ACT" then the DRD module string to find is "M1CS Actuator"
+//                         "M1CS.SEN"   --> "M1CS Sensor"
+
+
+
+   if (FirstModuleSearch) 			// examine the first ID found for this VA
+   {
+      thisID = FoundReqIDs[0]
+      lenThisID = length(thisID)
+
+//      print "Debug: firstmodulesearch happening, thisID=" thisID " \n"
+
+      citedMOD = ""
+
+      if (findPlainText(thisID,"M1CS.ACT",offset,len,false)) {		// handle special case
+         citedMOD = "M1CS Actuator"
+      } else if (findPlainText(thisID,"M1CS.SEN",offset,len,false)) {	// handle special case
+         citedMOD = "M1CS Sensor"
+      } else {				// not a special case, just extract the module name
+
+
+// Extract module name from Reqt ID - is between the last 2 hyphens in thisID
+
+         iStart = 0
+         iEnd = lenThisID - 1
+         while ( iEnd > 0 && ( thisID[iEnd:iEnd] != "-" ) ) iEnd--
+         iEnd--			// iEnd is now the char before the last hyphen
+         iStart = iEnd
+         while ( iStart > 0 && ( thisID[iStart:iStart] != "-" ) ) iStart--
+         iStart++		// iStart is now the char after the preceding hyphen
+
+         if ( iEnd-iStart < 1 ) {	//  trap error: thisID is not a valid Req ID
+            print "Error: citedMOD could not be extracted from thisID\n"
+            ack "Error: citedMOD could not be extracted from thisID. See log. Aborting."
+            print "Error: thisID is not valid:" thisID "  (should never happen)   Aborting. \n"
+            delete (reqID_re)
+            delete (reqMOD_re)
+            halt
+         }
+
+         citedMOD = thisID[iStart:iEnd]
+
+      }
+      print "Looking for this cited module: " citedMOD "   \n"
+
+
+// Loop over the items in these folders looking for a module whose name contains citedMOD string.
+
+      for (ifolder=0; ifolder < numFolders; ifolder++)
+      {
+         if (!folder(DRD_Folders[ifolder]))		// Can the user read this folder
+         {
+            print "ERROR: User lacks permission to read the DRD folder: " DRD_Folders[ifolder] " \n"
+            continue			// jump to next folder in the "for ifolder" loop
+         }
+
+         thisFolder = folder DRD_Folders[ifolder]
+
+         loopThroughFolder(thisFolder)		// recursively examine this folder
+
+         if (FoundModule) { break }		// jump out of this "for" loop to save time
+      }
+
+
+// If the DRD module was not found above, then tell user and halt gracefully.
+
+      if (!FoundModule) {
+         print "ERROR: failed to find the DRD module. citedMOD=" citedMOD "   Aborting. \n"
+         ack "ERROR: failed to find the DRD module.  Aborting. \n"
+         delete (reqID_re)
+         delete (reqMOD_re)
+         halt
+      }
+
+// At this point the DRD module is already open - read-only in the background (hidden)
+//   the module is: m_DRD and m_DRD_name
+
+      print "DRD module = " m_DRD_name " should now be open. (hidden)\n"
+
+      FirstModuleSearch = false
+   }
+
+
+
+
+// Loop over the list of Req IDs cited by this VA (the count is in NumIDsFound)
+//   the goal is to find each req in the DRD module and create links to each from this VA
+
+   for (i=0; i < NumIDsFound; i++)
+   {
+
+      thisID = FoundReqIDs[i]
+      lenThisID = length(thisID)
+
+//print "Debug: hunting for this ID: " thisID " \n"
+
+
+// Find the cited reqt (thisID) in the DRD module
+//      loop over all objects in the DRD module, look for TMT ID = thisID
+
+      FoundCitedReqt = false
+      for DRDobj in m_DRD do {	
+
+         thisTMTid = DRDobj."TMT ID"
+         if (thisTMTid != "") {			// ignore null TMT IDs (there are many)
+
+// trim whitespace off TMT ID found in the DRD before comparing
+//     this is to be tolerant of extra spaces, etc. in the DRD's TMT ID field.
+
+            thisTMTid_trimmed = trimWhiteSpace( thisTMTid )
+
+            if (thisTMTid_trimmed == thisID) {
+
+//               print "    found the cited reqt in the DRD module.\n"
+               FoundCitedReqt = true
+               countReqtsFound++
+
+               o -> LinkModuleVAs -> DRDobj	// create link from this VA to this DRD reqt
+//print "Debug: new link to be created here \n"
+               countCreatedLinks++
+
+               break				// jump out of loop over DRD module
+            }
+         }
+      }
+      if (!FoundCitedReqt) {
+         print "WARNING: Failed to find cited reqt: " thisID "\n"
+         countReqtsNotFound++
+      }
+
+   }		// end of loop over req IDs
+
+
+}		// end of loop over VA objects
+
+
+
+//=======================================================================================================
+// Clear memory (becuase DXL is not good at memory management)
+
+delete (reqID_re)
+delete (reqMOD_re)
+
+
+//=======================================================================================================
+// Print final output summary
+
+
+print countReqtsFound " cited requirements were found. \n"
+print countReqtsNotFound " cited requirements were NOT found. \n"
+print countDeletedLinks " pre-existing links were deleted. \n"
+print countCreatedLinks " new links were created. \n"
+print countSkipped " cited requirements were not recognized and were skipped. \n"
+print "Finished \n"
+
+ack "Look for errors in the output window.\nReview the VA module and the links created.\nSave the VAM if you are satisfied."
+
+
+
+
