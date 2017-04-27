@@ -4,7 +4,7 @@
 
  April 2017
 
- Version: 0
+ Version: 2
 
  Description: 	This DXL script updates the following attributes in the "Change Control Log" 
 		module:
@@ -458,7 +458,7 @@ for o in entire m do {
 
          icd_mod_name = this_doc	// this is the name of the ICD module we're looking for
          citedMOD = icd_mod_name
-
+         FoundModule = false
          thisFolder = folder ICD_Folder
          m_DRD_name = ""
 
