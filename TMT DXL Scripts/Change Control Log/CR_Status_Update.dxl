@@ -2,9 +2,9 @@
 /* 
  Update the "CR Implementation Status" field in the Change Control Log module.
 
- April 2017
+May 2017
 
- Version: 0
+ Version: 5
 
  Description: 	This DXL script updates the following attributes in the "Change Control Log" 
 		module:
@@ -44,6 +44,8 @@
 			- Only these folders are searched to find the DRD being cited.
 		3) The script assumes the ICDs are located in the folder:
 			/TMT Requirements/Interfaces
+		4) The script assumes there are no more than 100 Affected Docs for any one CR.
+		   This assumption is in the form of a 100 max array size for several arrays.
 
  Notes:		1) The code contains many debug print statements (commented out).
 		   These can be selectively uncommented to troubleshoot any future issues.
@@ -222,6 +224,7 @@ bool redo_object, FoundThisCR
 string newtext, output_text, cellText
 string icd_mod_name
 string CRnum, CRid, CRhist
+string DRDobjtxt, DRDhdrtxt
 string skippedCRs = ""
 int numSkippedObj = 0
 string errMsg
@@ -446,7 +449,28 @@ for o in entire m do {
 
          if (!FoundThisCR) {		// did  not find this CR in this DRD
 
-            newtext = newtext "\nNot Done"
+// Before we give up, lastly check the Change Record in this DRD, does any object mention this CR
+
+            for DRDobj in entire m_DRD do {	// ignore view filters and include deleted objs also
+
+               if ( isDeleted DRDobj ) continue			// skip this obj if it is deleted
+
+               DRDhdrtxt = DRDobj."Object Heading"		// get the heading text for this obj
+
+               if (DRDhdrtxt == "Introduction") { break }	// reached Intro, jump out of obj loop
+
+               DRDobjtxt = DRDobj."Object Text"
+               if (findPlainText(DRDobjtxt,CRnum,thisoffset,thislen,false)) {
+                  FoundThisCR = true
+                  newtext = newtext "\nExecuted"
+                  break					// jump out of loop to speed up script
+               }
+
+            }	// end of loop over objects in m_DRD (the ICD module)
+
+            if (!FoundThisCR) {
+               newtext = newtext "\nNot Done"
+            }
 
          }
 
@@ -458,7 +482,7 @@ for o in entire m do {
 
          icd_mod_name = this_doc	// this is the name of the ICD module we're looking for
          citedMOD = icd_mod_name
-
+         FoundModule = false
          thisFolder = folder ICD_Folder
          m_DRD_name = ""
 
@@ -471,7 +495,7 @@ for o in entire m do {
             FoundThisCR = false
             for DRDobj in m_DRD do {	
 
-               if (number DRDobj > "3") { break }	// jump out of loop when section 3 is reached
+               if (number DRDobj > "2") { break }	// jump out of loop when section 2 is reached
 
                if (cell DRDobj ) {		// is this object a table cell
 
@@ -480,7 +504,7 @@ for o in entire m do {
                   cellText = DRDobj."Object Text"
                   if (findPlainText(cellText,CRnum,thisoffset,thislen,false)) {
                      FoundThisCR = true
-                     break
+                     break			// jump out of loop to speed up script
                   }
 
                }
