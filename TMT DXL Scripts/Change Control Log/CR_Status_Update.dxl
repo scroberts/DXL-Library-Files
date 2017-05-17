@@ -61,7 +61,7 @@ pragma runLim, 0	// suppress DXL execution timeout
 
 
 
-string ICD_Folder    = "/TMT Requirements/Interfaces"		
+string ICD_Folder    = "/TMT Requirements/NxN Interfaces"		
 
 string DRD_Folders[] = {"/TMT Requirements/Level 0 Requirements", //-
 			"/TMT Requirements/Level 1 Requirements", //-
