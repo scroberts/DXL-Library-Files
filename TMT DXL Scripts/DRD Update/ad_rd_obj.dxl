@@ -2,7 +2,7 @@
 /* 
  Get Text From Documents Module AND Create Links - for TMT
  
- Version:	GetTextFromDocuments Module Gen2 v6.dxl
+ Version:	GetTextFromDocuments Module Gen2 v7.dxl
 
  Description: 	The purpose of this script is to populate the AD & RD table information for DRD modules.
 		The script reads the intended linked document ID from the attribute "AD/RD Document ID".
@@ -24,7 +24,8 @@
 			- depending on the value of OBJtext_OR_CRtext
 		5) AD Documents with dccDocStatus = "InProcess" are marked as "(In Preparation)" 
 			No hyperlinks or document versions are included for AD documents in preparation.
-		6) Objects with "DELETE" in the "AD/RD Document ID" field get no link and special text output
+		6) Objects with "DELETE" or "DELETED" in the "AD/RD Document ID" field have links deleted and 
+		 	a "(Deleted)" notation is added to the doc citation text
 		7) AD and RD objects with non-integers in the "AD/RD Document ID" field are reported and ignored
 
  Assumptions:	The script requires the following conditions for proper function:
@@ -54,7 +55,7 @@ pragma runLim, 0	// suppress DXL execution timeout
 
 // Tell script where to place output: Object Text = "OBJ" or CR Text = "CR"
 
-string OBJtext_OR_CRtext = "OBJ"
+string OBJtext_OR_CRtext = "OBJ"	// this script version is used for editing the OBJ Text
 
 
 Module m = current
@@ -79,6 +80,7 @@ Object o
 Object d
 string s = ""
 string newtext = ""
+string newRichText
 int i
 int count
 bool FoundDoc
@@ -113,6 +115,7 @@ int UpdateCount = 0
 int ADRDCount = 0
 int CountDocsFound = 0
 int CountDocsNotFound = 0
+int CountDeletedDocs  = 0
 int CountDeletedLinks = 0
 int CountCreatedLinks = 0
 int CountSkipped = 0
@@ -213,19 +216,24 @@ for o in m do {
 
 
 //=======================================================================================================
-// Check if the cited document DOORS ID = "DELETE"  
+// Check if the cited document DOORS ID = "DELETE" or "DELETED"
 //	In this case, use the existing link to fetch the document info, don't output any hyperlinks,
 //	and add the word "DELETED" to the citation.  Then delete the link.
-//	If there is no existing link, then ignore this object.
-//	Note: this code does not handle case where this object has multiple outlinks to documents
+//	If there is no existing link, then just add the "Deleted" notation to the citation.
+//	Note: If this object has multiple outlinks to documents, then the script will delete all outlinks.
+//	Also: If the doc citation already has "Deleted" at the end, then the script will add another one.
 
 
-      if (DocID == "DELETE") 
+      if (DocID == "DELETE" || DocID == "DELETED") 
       {
+         print "Found a deleted AD/RD. \n"		// debug line here
+         CountDeletedDocs++		// increment count of DocID fields that say DELETE or DELETED
          count = 0
          for outLink in o->LinkModuleName do 	// examine all links through the Documents link module
          {					// fetch the info for this linked document
             count++
+
+// Remember the linked doc info, because we will be deleting this link
 
             dccDocNo 			= (target outLink)."dccDocNo"
             dccDocRev 			= (target outLink)."dccDocRev"
@@ -233,21 +241,34 @@ for o in m do {
             dccDocStatus 		= (target outLink)."dccDocStatus"
             DocumentTitle 		= (target outLink)."DocumentTitle"
             DocumentNo 			= (target outLink)."DocumentNo"
+            DocumentObjText 		= (target outLink)."Object Text"
             CADDocumentNo 		= (target outLink)."CADDocumentNo"
             DocumentRev 		= (target outLink)."DocumentRev"
 
-            delete outlink			// now delete this link
+            if (canDelete(outLink)) {
+               delete outLink			// now delete this link
+            } else {
+               print "ERROR: Was not able to delete the link from " ADRD_prefix " to Doc " dccDocNo " \n"
+            }
+
          }
+
          if (count > 0) { flushDeletions }	// flush intentionally done outside of above loop
          if (count > 1) { print "WARNING: this AD/RD had multiple links to documents.  Only the last was used. \n" }
+			
+// Create new deleted doc citation: use existing OBJ text
 
-         if (count == 0) 			// there were no links to docs, so ignore this object
-         {
-            continue				// jump to the top of the loop over DRD objects
-         } 
-         FoundDoc = true
+         newRichText = richText o."Object Text"			// get the existing RTF object text 
+								//    (so we retain the bold AD/RD)
+         newRichText = newRichText "\t(Deleted)\n"		// append the deleted notation
 
-      } else					// DocID does not = DELETE
+         o."Object Text" = richText newRichText			// update the Object Text field
+         o."AD/RD Document ID" = ""				// clear out the DocID field for this AD/RD
+
+         continue				// jump to get the next AD/RD object in the DRD
+
+
+      } else					// DocID does not = DELETE or DELETED
       {
 
 
@@ -273,7 +294,7 @@ for o in m do {
          for d in docModule do {		// loop over all objects in the documents module
 
             DRdocID = identifier d		// DOORS ID in string format
-            absno = d."Absolute Number"	// DOORS ID in integer format
+            absno = d."Absolute Number"		// DOORS ID in integer format
 
             if (DRdocID == DocID) 		// does this document match the cited DocID
             {
@@ -315,7 +336,7 @@ for o in m do {
          }					// end loop over documents module
 
 
-      }		// endif DocID = DELETE
+      }		// endif DocID = DELETE or DELETED
 
 
 //=======================================================================================================
@@ -374,12 +395,12 @@ for o in m do {
  
             if ( ADorRD == "AD" )			// add rev info for ADs, not RDs
             {
-	            if (!null DocumentRev) 		// add the rev for this drawing, if it exists
-	            {
-		            newtext = newtext "  Rev " DocumentRev
+	       if (!null DocumentRev) 		// add the rev for this drawing, if it exists
+	       {
+                  newtext = newtext "  Rev " DocumentRev
+               }
             }
          }
-     }
 
          if (!null dccDocNo) 	// add dccDocNo if not empty
          {
@@ -420,55 +441,49 @@ for o in m do {
             }
          }
 
-         if (DocID == "DELETE")			// is a deleted doc, so add a notation
-         {
-           newtext = newtext "\n\t     (DELETED)"
 
-         } else					// is not a delete, so add exta info here
+         if (dccDocStatus == "InProcess")	// if doc is in preparation, add a notation for ADs
          {
 
-            if (dccDocStatus == "InProcess")	// if doc is in preparation, add a notation for ADs
+            if ( ADorRD == "AD" ) 
+            { 
+               newtext = newtext "   (In Preparation)" 
+
+            } else				// this is an RD, so include the handle hyperlink
             {
-
-               if ( ADorRD == "AD" ) 
+               if (dccDocHandleHyperlink != "")	// if DCC handle hyperlink is available, use it
                { 
-                  newtext = newtext "   (In Preparation)" 
-
-               } else				// this is an RD, so include the handle hyperlink
-               {
-                  if (dccDocHandleHyperlink != "")	// if DCC handle hyperlink is available, use it
-                  { 
-                     newtext = newtext "\n\t" dccDocHandleHyperlink 
-                  }
+                  newtext = newtext "\n\t" dccDocHandleHyperlink 
                }
+            }
 
-            } else				// doc is not in preparation
-            {
+         } else				// doc is not in preparation
+         {
 
 
 // In all cases (TMT or non-TMT), use the TMT/DCC hyperlink if it's there  (no hyperlinks for InProcess docs)
 
-               if ( ADorRD == "AD" )	// use different hyperlink for ADs and RDs
-               {
-                  ADRDdcchyperlink = dccDocVersionHyperlink
-               } else
-               {
-                  ADRDdcchyperlink = dccDocHandleHyperlink
-               }
+            if ( ADorRD == "AD" )	// use different hyperlink for ADs and RDs
+            {
+               ADRDdcchyperlink = dccDocVersionHyperlink
+            } else
+            {
+               ADRDdcchyperlink = dccDocHandleHyperlink
+            }
 
-               if (ADRDdcchyperlink != "")		// if DCC hyperlink is available, use it
-               {
-                  newtext = newtext "\n\t" ADRDdcchyperlink
+            if (ADRDdcchyperlink != "")		// if DCC hyperlink is available, use it
+            {
+               newtext = newtext "\n\t" ADRDdcchyperlink
 
-               } else		// no TMT doc version link, use DocumentHyperlink if it's not empty
+            } else		// no TMT doc version link, use DocumentHyperlink if it's not empty
+            {
+               if (!null DocumentHyperlink) 
                {
-                  if (!null DocumentHyperlink) 
-                  {
-                     newtext = newtext "\n\t" DocumentHyperlink
-                  }
+                  newtext = newtext "\n\t" DocumentHyperlink
                }
-            } 
-         }
+            }
+         } 
+
 
 
          newtext = newtext "\n"		// add extra blank line at the bottom to improve readability after export
@@ -514,6 +529,7 @@ print ADRDCount " AD and RD objects were found in the DRD. \n"
 print CountDocsFound " cited documents were found in the Documents Register. \n"
 print CountDocsNotFound " cited documents were NOT found. \n"
 print UpdateCount " AD/RD objects were upated in the DRD. \n"
+print CountDeletedDocs " AD/RD documents were marked as deleted, per DELETED flag. \n"
 print CountDeletedLinks " links were deleted. \n"
 print CountCreatedLinks " links were created. \n"
 print CountSkipped " objects were not recognized and were skipped. \n"
