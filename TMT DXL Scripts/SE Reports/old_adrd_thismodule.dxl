@@ -80,11 +80,14 @@ string titleinfo
 int doc_absno
 int newer_absno
 int obj_absno
+string obj_objtxt
 string doc_no
 string doc_docno
 string doc_status
 string doc_objtxt
 bool sameDoc
+string adrdtitle
+int offset, len
 
 
 
@@ -153,6 +156,7 @@ output << "\nPROCESSING: " thisModuleName "\n"
       obj_number = number(o)			// is a string, e.g. 1.4-2-5 
       if ( obj_number >= "2" ) {break}		// jump out of loop over objects if past section 1
       obj_absno = o."Absolute Number"
+      obj_objtxt = o."Object Text"
 
 
       for outLink in o->LinkModuleName do	// loop over all outlinks to the Docs module
@@ -229,9 +233,24 @@ output << "\nPROCESSING: " thisModuleName "\n"
 
                      newer_absno = doc_absno
                      print "   Link from DRD ID " obj_absno " to Doc ID " link_absno " is old.  Newer is: " doc_absno "  \n"
-                     output << "      Link from DRD ID " obj_absno " to Document ID " link_absno " is old. \n"
-                     output << "           Newer Doc is: " doc_absno "\n"
-                     output << "           Title:        " titleinfo " \n"
+//old                     output << "      Link from DRD ID " obj_absno " to Document ID " link_absno " is old. \n"
+//old                     output << "           Newer Doc is: " doc_absno "\n"
+//old                     output << "           Title:        " titleinfo " \n"
+
+// next lines are new. if it works, then comment out preceding output lines
+
+// Print entry in report - of new document to link to for this object
+//   Include the first line of the AD/RD entry in the DRD module
+
+                     if (findPlainText(obj_objtxt,"\n",offset,len,false)) {
+                        adrdtitle = obj_objtxt[0:offset-1]
+                     } else {
+                        adrdtitle = obj_objtxt
+                     }
+                     output << "  " adrdtitle " needs to be changed from " link_absno " to " doc_absno " \n"
+
+
+
                      if (link_supersede != "") {
                         output << "           Original Linked Doc Marked as Superseded by: " link_supersede " \n"
                      }
