@@ -2,7 +2,7 @@
 /* 
  Get Text From Documents Module AND Create Links - for TMT
  
- Version:	GetTextFromDocuments Module Gen2 v6.dxl
+ Version:	GetTextFromDocuments Module Gen2 v8.dxl
 
  Description: 	The purpose of this script is to populate the AD & RD table information for DRD modules.
 		The script reads the intended linked document ID from the attribute "AD/RD Document ID".
@@ -25,7 +25,7 @@
 		5) AD Documents with dccDocStatus = "InProcess" are marked as "(In Preparation)" 
 			No hyperlinks or document versions are included for AD documents in preparation.
 		6) Objects with "DELETE" or "DELETED" in the "AD/RD Document ID" field have links deleted and 
-		 	a "(Deleted)" notation is added to the doc citation text
+		 	the document title is replaced with a "DELETED" notation
 		7) AD and RD objects with non-integers in the "AD/RD Document ID" field are reported and ignored
 
  Assumptions:	The script requires the following conditions for proper function:
@@ -224,7 +224,9 @@ for o in m do {
 //	Also: If the doc citation already has "Deleted" at the end, then the script will add another one.
 
 
-      if (DocID == "DELETE" || DocID == "DELETED") 
+      if (DocID == "DELETE" || DocID == "DELETED" //-
+		|| DocID == "Delete" || DocID == "Deleted" //-
+		|| DocID == "delete" || DocID == "deleted") 
       {
          print "Found a deleted AD/RD. \n"		// debug line here
          CountDeletedDocs++		// increment count of DocID fields that say DELETE or DELETED
@@ -258,11 +260,16 @@ for o in m do {
 			
 // Create new deleted doc citation: use existing CR text
 
-         newRichText = richText o."CR Text"			// get the existing RTF CR text 
-								//    (so we retain the bold AD/RD)
-         newRichText = newRichText "\t(Deleted)\n"		// append the deleted notation
+//         newRichText = richText o."CR Text"			// get the existing RTF CR text 
+//								//    (so we retain the bold AD/RD)
+//         newRichText = newRichText "\t(Deleted)\n"		// append the deleted notation
 
-         o."CR Text" = richText newRichText			// update the CR Text field
+
+         bufferText = "{\\b " ADRD_prefix "}"			// start off by making the AD/RD number bold
+         bufferText += "\tDELETED\n"				// tack on a tab and the deleted notation
+
+         o."CR Text" = richText tempStringOf bufferText		// update the CR Text field
+
          o."AD/RD Document ID" = ""				// clear out the DocID field for this AD/RD
 
          continue				// jump to get the next AD/RD object in the DRD
