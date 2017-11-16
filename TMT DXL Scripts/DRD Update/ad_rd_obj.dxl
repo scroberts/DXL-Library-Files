@@ -32,7 +32,7 @@
 		1) The user must have the DRD module open with edit access.
 		2) Object Text begins with AD or RD.  A regexp is used to spot these and handle the differences.
 		3) The script only processes objects in section 1 where the Object Text begins with AD or RD.
-		4) The Documents module is named "/TMT Requirements/Documents Register/Documents Register".
+		4) The Documents module is named "/TMT Requirements/Document and CR Registers/Documents Register".
 		5) The Documents Register module is left open (read-only), so the user must close it.
 		6) The link module to use is named "/TMT Requirements/Links/Documents".
 		
@@ -86,7 +86,7 @@ int count
 bool FoundDoc
 string ADorRD = ""
 
-string Documents_Module 	= "/TMT Requirements/Documents Register/Documents Register"
+string Documents_Module 	= "/TMT Requirements/Document and CR Registers/Documents Register"
 string LinkModuleName 		= "/TMT Requirements/Links/Documents"
 Module docModule
 Link outLink

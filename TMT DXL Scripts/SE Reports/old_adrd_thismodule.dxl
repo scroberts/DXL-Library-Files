@@ -19,7 +19,7 @@
 		2) the script only examines the current module - assumed to be a DRD module
 			- unknown errors will occur if the current module is not a DRD module
 		3) the Documents Register module name is hard-coded:
-			"/TMT Requirements/Documents Register/Documents Register"
+			"/TMT Requirements/Document and CR Registers/Documents Register"
 		4) the Documents link module name is hard-coded:
 			"/TMT Requirements/Links/Documents"
 		5) the script will close the Documents Register at the end, 
@@ -46,7 +46,7 @@ string filename = "SE_report.txt"		// define output filename
 //=======================================================================================================
 // Variable declarations
 
-string Documents_Module 	= "/TMT Requirements/Documents Register/Documents Register"
+string Documents_Module 	= "/TMT Requirements/Document and CR Registers/Documents Register"
 Module docModule
 string LinkModuleName 		= "/TMT Requirements/Links/Documents"
 Link outLink

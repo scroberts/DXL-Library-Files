@@ -32,7 +32,7 @@ pragma runLim, 0		// suppress DXL execution timeout
 // Variable declarations
 
 
-string Documents_Module 	= "/TMT Requirements/Documents Register/Documents Register"
+string Documents_Module 	= "/TMT Requirements/Document and CR Registers/Documents Register"
 
 Object o
 
