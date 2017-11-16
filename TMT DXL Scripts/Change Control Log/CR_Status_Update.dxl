@@ -68,7 +68,7 @@ string DRD_Folders[] = {"/TMT Requirements/Level 0 Requirements", //-
 			"/TMT Requirements/Level 2 Requirements", //-
 			"/TMT Requirements/Level 3 Requirements"}
 
-string Documents_Module = "/TMT Requirements/Documents Register/Documents Register"
+string Documents_Module = "/TMT Requirements/Document and CR Registers/Documents Register"
 
 
 

@@ -18,7 +18,7 @@
 		2) the script only examines the modules with names beginning with "DRD "
 		3) assumes a max of 150 valid DRD modules - used in an array declaration (DRD_modules_items)
 		4) the Documents Register module name is hard-coded:
-			"/TMT Requirements/Documents Register/Documents Register"
+			"/TMT Requirements/Document and CR Registers/Documents Register"
 		5) the Documents link module name is hard-coded:
 			"/TMT Requirements/Links/Documents"
 		6) the script requires read access to all listed DRD modules and the Documents module
@@ -60,7 +60,7 @@ string DRD_Folders[] = {"/TMT Requirements/Level 0 Requirements", //-
 int numFolders = sizeof DRD_Folders
 
 
-string Documents_Module 	= "/TMT Requirements/Documents Register/Documents Register"
+string Documents_Module 	= "/TMT Requirements/Document and CR Registers/Documents Register"
 Module docModule
 string LinkModuleName 		= "/TMT Requirements/Links/Documents"
 Link outLink
