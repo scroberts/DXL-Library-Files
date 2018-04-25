@@ -1,4 +1,4 @@
-// Cleanup DRD Module Post-Import
+// Cleanup DRD Module or ICD Post-Import
 /* 
 Set the values of IsReq and Paragraph Style after importing a new DRD module - for TMT
 March 2016
@@ -9,7 +9,7 @@ Description: 	This DXL script automatically populates the IsReq and Paragraph St
 		This is intended to be run after importing a new DRD module.
 		
 Process:	This is the logic used:
-		1) Requirements: object text starts with "[REQ-"
+		1) Requirements or ICD: object text starts with "[REQ-" or "[ICD-"
 		2) Discussions: object text starts with "Discussion:"
 		3) Figure Captions: object text starts with "Figure"
 		4) Table Captions: object text starts with "Table"
@@ -77,7 +77,7 @@ for o in m do {					// Step through the objects in this module
    o."IsReq" = false				// set IsReq to false by default
 
 
-   if (obj_text[0:4] == "[REQ-")		// is this object a requirement
+   if (obj_text[0:4] == "[REQ-" or obj_text[0:4] == "[ICD-")		// is this object a requirement
    {
       o."IsReq" = true
       o."Paragraph Style" = "<Object Text:Requirement>"
