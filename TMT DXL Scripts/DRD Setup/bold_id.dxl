@@ -4,27 +4,27 @@ Make TMT ID bold in Object Text field - for TMT
 October 2015	[text added here to test github functions]
 
 Description: 	This is a DXL script for use in bolding the TMT ID in the Object Text attribute 
-		of requirements in DRD modules.
+		of requirements in DRD modules or ICD modules.
 
 Assumptions:	The script requires the following conditions for proper function:
 		1) The user has opened the desired module in exclusive edit mode.
 		2) The TMT ID is the first thing in the object text
 		   If there is even 1 space before it, then it will not be bolded
-		3) Warning: TMT IDs are matched with a simple pattern: "[REQ-"
-		4) TMT IDs have 16 characters: "[REQ-#-ABC-####]"
+		3) Warning: TMT IDs are matched with a simple pattern: "[REQ-" or "[ICD-"
+		4) TMT IDs have X characters: "[REQ-#-ABC-####]" or "[ICD-XXX-XXX-####"
 		5) The script will not bold IDs that do not appear at the beginning of the Object Text.
 		   Any IDs that are prefixed with a space will be ignored and not reported to the user.
-		   Find and manually bold these using a filter on Object Text containing " [REQ".
+		   Find and manually bold these using a filter on Object Text containing " [REQ" or " [ICD".
 
 		
-Directions:	1) Open the desired DRD module in exclusive edit mode
+Directions:	1) Open the desired DRD or ICD module in exclusive edit mode
 		2) In that module window, select menu item: Tools / Edit DXL...
 		3) Paste this script code into the dialog window and click "Run"
 		4) Manually bold any IDs that were reported by the script as skipped.
 
-Notes:		1) The script does not save the module, the user should review the changes and 
+Notes:  1) The script does not save the module, the user should review the changes and 
 		   save the module if satisfied.
-		2) The script checks the RTF version of the Object Text for the "[REQ-" string because
+		2) The script checks the RTF version of the Object Text for the "[REQ-" or "[ICD-" string because
 		   a few objects may have some odd kerning command characters inserted after the "["
 		   and that causes problems.  For those, the Object ID is printed so the user can
 		   easily find them and bold those IDs manually.
@@ -60,25 +60,26 @@ for o in m do {					// Step through the objects in this module
    newText = ""
    obj_text_string = o."Object Text"
 
-   if (obj_text_string[0:4] == "[REQ-")		// check if this obj text begins with a TMT ID
+   if (obj_text_string[0:4] == "[REQ-" or obj_text_string[0:4] == "[ICD-")		// check if this obj text begins with a TMT ID
    {
 
-      TMT_ID = obj_text_string[0:15]
+      TMT_ID = "["  o."TMT ID" "]"
 
       oldText = richTextWithOle o."Object Text"
 
-      offset = contains(oldText, "[REQ-", 0)	// find offset of the TMT ID
+      offset = contains(oldText,obj_text_string[0:4], 0)	// find offset of the TMT ID
 
-      if (offset == -1) 			// "[REQ-" was not found in the RTF version
+      if (offset == -1 ) 			// "[REQ-" was not found in the RTF version
       {						// report this & do nothing with this object
-         print "[REQ- not found in RTF: " identifier o " ... skipping this object. \n"
+         print "[REQ- or ICD- not found in RTF: " identifier o " ... skipping this object. \n"
          print "oldText:" tempStringOf oldText " \n"
 	
-      } else					// found "[REQ-" in the RTF version
+      } else					// found "[REQ-" or "[ICD-" in the RTF version
       {
-         newText = oldText[0:offset-1]		// construct new text, starting with RTF preamble
+	      
+	   newText = oldText[0:offset-1]		// construct new text, starting with RTF preamble
          newText += "{\\b " TMT_ID "}"		// then add the bold TMT ID
-         newText += oldText[offset+16:]		// then append the rest of the original text
+         newText += oldText[offset+length(TMT_ID):]		// then append the rest of the original text
 
          o."Object Text" = richText tempStringOf newText
       }
