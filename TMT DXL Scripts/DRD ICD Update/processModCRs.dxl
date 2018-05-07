@@ -38,7 +38,7 @@ Directions:	1) Open the DRD module where you want to process a CR.
 
 */
 
-#include "TMT DXL Scripts/DRD Update/CRutils.dxl"
+#include "TMT DXL Scripts/DRD ICD Update/CRutils.dxl"
 
 pragma runLim, 0	// suppress DXL execution timeout
 
