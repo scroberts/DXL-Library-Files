@@ -6,6 +6,6 @@ tmt_id t _ Populate TMT ID Field
 bold_id b _ Make TMT IDs Bold in Object Text
 insert_id i _ Insert TMT ID into Start of Object Text
 set_affect_change_dates _ _ Set Affects Change Dates for All Attributes
-drd_cleanup c _ Post-Import DRD Cleanup
+drd_icd_cleanup c _ Post-Import DRD Cleanup
 Remove_Left_Indent_v2 l _ Remove Left Indent
 demote_discussions d _ Demote Discussions
