@@ -4,6 +4,7 @@
 ad_rd_obj a _ Update AD/RD Lists (Object Text)
 ad_rd_cr r _ Update AD/RD Lists (CR Text)
 FindFreeTMT_IDs f _ Find Free TMT IDs Within a Range
+TMT_duplicateIDs_script b _ Find Duplicate IDs
 processModCRs c _ Process CR
 import_compliance_fields i _ Import Compliance Fields from Excel
 clear_suspect _ _ Clear All Suspect Links in ALL DRDs
