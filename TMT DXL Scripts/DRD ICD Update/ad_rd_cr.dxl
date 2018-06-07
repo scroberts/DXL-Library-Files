@@ -239,9 +239,9 @@ for o in m do {
 
             dccDocNo 			= (target outLink)."dccDocNo"
             dccDocRev 			= (target outLink)."dccDocRev"
-            dccDocTitle 		= (target outLink)."dccDocTitle"
+            dccDocTitle 		= (target outLink)."Object Text"
             dccDocStatus 		= (target outLink)."dccDocStatus"
-            DocumentTitle 		= (target outLink)."DocumentTitle"
+            DocumentTitle 		= (target outLink)."Object Text"
             DocumentNo 			= (target outLink)."DocumentNo"
             DocumentObjText 		= (target outLink)."Object Text"
             CADDocumentNo 		= (target outLink)."CADDocumentNo"
@@ -326,9 +326,9 @@ for o in m do {
 // get the values from the Documents Register
                dccDocNo 		= d."dccDocNo"
                dccDocRev 		= d."dccDocRev"
-               dccDocTitle 		= d."dccDocTitle"
+               dccDocTitle 		= d."Object Text"
                dccDocStatus 		= d."dccDocStatus"
-               DocumentTitle 		= d."DocumentTitle"
+               DocumentTitle 		= d."Object Text"
                DocumentObjText 		= d."Object Text"
                DocumentNo 		= d."DocumentNo"
                CADDocumentNo 		= d."CADDocumentNo"
