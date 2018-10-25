@@ -1,0 +1,608 @@
+﻿// Update WVR Implementation Status, Docs Affected, Docs Status, Docs No and Ver
+/* 
+ Update the "WVR Implementation Status" field in the Change Control Log module.
+
+May 2017
+
+ Version: 5
+
+ Description: 	This DXL script updates the following attributes in the "Change Control Log" 
+		module:
+			"WVR Implementation Status"
+			"Docs Affected"
+			"Docs Status"
+			"Docs No and Ver"
+ 		This DXL is meant to be run by a DOORS Trigger event, upon opening the 
+		Change Control Module. The script can also be run from the TMT DXL menu tree.
+		The script loops over the entire module. For each DRD or ICD in the
+		"Docs Affected" field, the script checks if they exist in DOORS, then opens 
+		them and checks if that WVR has been implemented in each DRD and ICD cited.
+
+		If everything works well, then nothing is reported to the user. If any errors 
+		occur, then they will appear in a DXL window.
+		If the user opens the module read-only, then the script will report this
+		to the user, noting that the fields have not been updated.
+
+		The user can ensure that any object is completely updated simply by editing the
+		contents of the "WVR Implementation Status" field so that it has a different 
+		number of lines than the "Docs Affected" field.  Or, just clear out the
+		"WVR Implementation Status" field.
+
+		The user can also run this script any time by selecting it from the custom 
+		TMT DXL menu tree.
+
+ Logic Outline:	Below is an outline of the logic used in this script.
+
+		[content missing]
+
+
+ Assumptions:	The script requires the following conditions for proper function:
+		1) The script ignores the user's current view filter settings.
+
+		2) The script assumes the DRDs are located in the specified DOORS folders. 
+			- See the array below
+			- Only these folders are searched to find the DRD being cited.
+		3) The script assumes the ICDs are located in the folder:
+			/TMT Requirements/Interfaces
+		4) The script assumes there are no more than 100 Affected Docs for any one WVR.
+		   This assumption is in the form of a 100 max array size for several arrays.
+
+ Notes:		1) The code contains many debug print statements (commented out).
+		   These can be selectively uncommented to troubleshoot any future issues.
+		2) This version of this script ALSO populates the attributes "Docs Affected"
+		   and "Docs Status".  That data was formerly displayed in columns using 
+		   Layout DXL that Gelys created. This script eliminates that Layout DXL
+		   and populates attributes (instead of columns) - using DXL code taken
+		   from the original Layout DXL.
+  
+*/
+
+pragma runLim, 0	// suppress DXL execution timeout
+
+
+
+string ICD_Folder    = "/TMT Requirements/NxN Interfaces"		
+
+string DRD_Folders[] = {"/TMT Requirements/Level 0 Requirements", //-
+			"/TMT Requirements/Level 1 Requirements", //-
+			"/TMT Requirements/Level 2 Requirements", //-
+			"/TMT Requirements/Level 3 Requirements"}
+
+string Documents_Module = "/TMT Requirements/Document and CR Registers/Documents Register"
+
+
+
+//=======================================================================================================
+// Subroutine Definition
+
+// Loop over the "items" in a given folder.
+//       if the item is a folder, then recursively process that folder
+//       if the item is a formal module, then process that:
+//          test if this string (citedMOD) is in the module name
+//          if a match, then open it and jump out of the recursive stack
+
+
+// Variables defined here so they have global scope and this subroutine can use them
+
+bool 	FoundModule = false
+string 	citedMOD
+Module 	m_DRD
+string 	m_DRD_name
+
+void loopThroughFolder (Folder f)
+{
+   Module mod = null
+   Item i
+   string thisMOD_name = ""
+   int offset, len
+
+   if (null f) { return }
+
+   if (FoundModule) {return}			// bail out if module already found
+
+   for i in f do				// loop over all items in the folder
+   {
+      if (isDeleted(i)) {continue}		// skip deleted items
+
+      if (type(i) == "Folder") {		// recursively dive into any folder
+
+         loopThroughFolder(folder(i))
+
+      } else if (type(i) == "Formal") {		// this is a formal module
+
+         thisMOD_name = name(i)			// get module name (string)
+         if (findPlainText(thisMOD_name,citedMOD,offset,len,false)) {
+            FoundModule = true
+            m_DRD_name = thisMOD_name		// remember the module name string
+            m_DRD = read(fullName(i), false)	// open the module, read-only
+
+            break				// jump out of "for i" loop
+         }
+      }
+   }
+}
+
+
+//=======================================================================================================
+// Subroutine Definition
+
+// Trims the whitespace from the beginning and end of the given string.
+// Returns: the trimmed string
+//          "" if no non-whitespace string remains
+
+
+string trimWhiteSpace (string s)
+{
+   int first = 0
+   int last = ( length s ) - 1
+
+// Find the last char that is not whitespace
+
+   while ( last > 0 && isspace( s[last] ) ) last--
+
+// Find the first char that is not whitespace
+
+   while ( isspace( s[first] ) && first < last ) first++
+
+   if ( first == last && isspace s[first] ) return ""
+
+   return s[first:last]
+
+}
+
+
+
+//=======================================================================================================
+//=======================================================================================================
+// MAIN CODE
+
+
+Module m = current
+if (null m)
+{
+   ack "No module is open!  Aborting."
+   halt
+}
+if (!exists attribute "WVR Implementation Status") {
+   ack "Attribute [WVR Implementation Status] does not exist. Aborting."
+   halt
+}
+
+
+if (isShare current)
+{
+   ack "This module is opened Shareable-Edit.\nObjects locked by other users will be skipped."
+}
+
+if (isRead current)
+{
+   ack "This module is opened Read-Only.\nThe WVR Implementation Status field is not updated."
+}
+
+bool openShareable = false
+if (isShare current) openShareable = true
+
+
+ModName_ DocsModule = module(Documents_Module)		// convert module name to module handle
+if ( !open(DocsModule) )				// 'open' needs a module handle
+{							// Documents Module is NOT open
+   Module docModule = read(Documents_Module, false)
+   if (null docModule)
+   {
+      ack "Could not open the Documents module!\nThe WVR Implementation Status field is not updated."
+      halt
+   }
+}
+
+
+
+//=======================================================================================================
+// Initialize some variables
+
+
+Object o 
+Object DRDobj
+
+int offset
+int iStart, iEnd
+
+int i, ifolder, thisoffset, thislen
+string useThis, trimmedText
+string thisMOD_name
+
+
+bool FirstModuleSearch = true
+Folder thisFolder
+
+int numFolders = sizeof DRD_Folders
+
+string Docs_Affected, OLD_WVR_Imp_Status, Docs_Status, Docs_No_Ver
+string list, this_line, lines_cr[100], lines_docs[100], lines_docstat[100], lines_docsnover[100]
+int numlines, numlines_crimpstat, numlines_docs,  numlines_docstat
+string this_doc, this_wvr_status, this_docstat
+bool redo_object, FoundThisWVR
+string newtext, output_text, cellText
+string icd_mod_name
+string WVRnum, WVRid, WVRhist
+string DRDobjtxt, DRDhdrtxt
+string skippedCRs = ""
+int numSkippedObj = 0
+string errMsg
+
+Regexp line_re = regexp2 ".*"		// matches any char except newline
+
+Link l
+LinkRef lr
+ModName_ otherMod = null
+Module linkMod = null
+ModuleVersion otherVersion = null
+Object othero
+bool firstline
+string linkModName = "*"
+int numInLinks
+string src_dccShortTitle
+string src_dccDocStatus
+
+
+
+
+//=======================================================================================================
+// Loop over all objects in the current module (Change Control Log module)
+
+
+for o in entire m do {
+
+   if ( isDeleted o ) { continue }		// skip this obj if it is deleted
+
+   redo_object = false
+
+// Begin by populating the "Docs Affected" and "Docs Status" attributes using code taken from the 
+// Layout DXL that was used to populate the columns.
+
+   firstLine = true
+   numInLinks = 0
+   Docs_Affected = ""
+   Docs_Status = ""
+   numlines_docs = 0
+   numlines_docstat = 0
+
+   for l in all(o<-linkModName) do {
+      numInLinks++
+      otherVersion = sourceVersion l
+      otherMod = module(otherVersion)
+      load(otherVersion,false)
+      othero = source l
+
+      if (null othero) continue
+      if (isDeleted othero) continue
+
+      src_dccShortTitle = ""
+      src_dccShortTitle = othero."dccShortTitle"
+      src_dccShortTitle = trimWhiteSpace(src_dccShortTitle)
+      src_dccDocStatus  = ""
+      src_dccDocStatus  = othero."dccDocStatus"
+      src_dccDocStatus  = trimWhiteSpace(src_dccDocStatus)
+      src_dccDocNo      = ""
+      src_dccDocNo      = othero."dccDocNo"
+      src_dccDocRev     = ""
+      src_dccDocRev     = othero."dccDocRev"
+
+
+      if (firstLine) {
+
+         Docs_Affected = src_dccShortTitle
+         Docs_Status   = src_dccDocStatus
+         Docs_No_Ver   = src_dccDocNo " " src_dccDocRev
+         firstLine = false
+
+      } else {
+
+         Docs_Affected = Docs_Affected "\n" src_dccShortTitle
+         Docs_Status   = Docs_Status "\n" src_dccDocStatus
+         Docs_No_Ver   = Docs_No_Ver "\n" src_dccDocNo " " src_dccDocRev
+
+      }
+      lines_docs[numlines_docs] = src_dccShortTitle
+      numlines_docs++
+      lines_docstat[numlines_docstat] = src_dccDocStatus
+      numlines_docstat++
+      lines_docsnover[numlines_docs] = src_dccDocNo " " src_dccDocRev
+
+   }
+
+   if (numInLinks == 0) continue		// jump to next object in the Change Control Log module
+
+
+
+// Get the contents of the attribute "WVR Implementation Status"
+
+   OLD_WVR_Imp_Status = o."WVR Implementation Status"
+
+
+// Get the WVR Number for this object
+
+   WVRnum = ""
+   WVRnum = identifier o
+
+
+// Separate the lines in the "WVR Implementation Status" field, put into lines_cr[]
+
+   list = OLD_WVR_Imp_Status
+   numlines = 0
+   while (!null list && line_re list) {
+      this_line = list[match 0]
+      list = list[end 0 + 2:]		// chop off this line, list now is remainder of list
+      lines_cr[numlines] = this_line
+      numlines++			// increment counter of number of lines found
+   }
+   numlines_crimpstat = numlines
+
+
+// If "Docs Affected" has different number of lines than "WVR Implementation Status"
+// then we need to redo this object.
+
+   if (numlines_docs != numlines_crimpstat) { redo_object = true }
+
+
+
+   newtext = ""
+   output_text = ""
+
+
+//=======================================================================================================
+// Loop over the list of Docs Affected
+
+   for (i=0; i < numlines_docs; i++)
+   {
+      this_doc = lines_docs[i]					// get the Docs Affected line
+      this_wvr_status = ""
+      if (!redo_object) { this_wvr_status = lines_cr[i] }	// get the paired WVR Implementation Status line
+      this_docstat = lines_docstat[i]				// get the paired Docs Status line
+
+
+//    If this line in WVR Implementation Status = "Executed" or "N/A DOORS" then skip this Doc
+//    This is meant to save procesing time.
+//    However, if we are redoing the object, then don't skip it.
+
+      if (!redo_object) {
+         if (this_wvr_status == "Executed") { 
+            newtext = newtext "\nExecuted"
+            continue				// skip this Doc, get next one
+         }	
+         if (this_wvr_status == "N/A DOORS") {
+            newtext = newtext "\nN/A DOORS"
+            continue				// skip this Doc, get next one
+         }	
+      }
+
+
+      if (this_doc[0:3] == "DRD ") {		// this doc is a DRD
+
+// Look for this DRD module in the folders defined at top of code
+
+         citedMOD = this_doc
+         FoundModule = false
+         for (ifolder=0; ifolder < numFolders; ifolder++)
+         {
+            if (!folder(DRD_Folders[ifolder]))		// Can the user read this folder
+            {
+               print "ERROR: User lacks permission to read the DRD folder: " DRD_Folders[ifolder] " \n"
+               continue			// jump to next folder in the "for ifolder" loop
+            }
+
+            thisFolder = folder DRD_Folders[ifolder]
+            m_DRD_name = ""
+
+            loopThroughFolder(thisFolder)		// recursively examine this folder
+
+            if (FoundModule) break		// jump out of this "for" loop to save time
+         }
+
+
+// The DRD module was not found in the DOORS folders
+
+         if (!FoundModule) {			// DRD not found, check if it's old
+
+            print "Debug: failed to find the DRD module: " citedMOD " \n"
+
+            if (this_docstat == "SUPERSEDED" || this_docstat == "Obsoleted") {
+
+               newtext = newtext "\nExecuted"
+
+            } else {				// DRD not found and not old
+
+               newtext = newtext "\nNot in DOORS"
+
+            }
+
+            continue				// go get next Docs Affected
+         }
+
+// The DRD module WAS found
+//   At this point the DRD module is already open - read-only in the background (hidden)
+//   the module is: m_DRD and m_DRD_name
+
+         FoundThisWVR = false
+         for DRDobj in entire m_DRD do {	// ignore view filters and include deleted objs also
+
+// Look for this WVRnum in the WVR History field or in the WVR ID field
+
+            WVRhist = DRDobj."WVR History"
+            WVRid   = DRDobj."CR ID"
+
+            if (findPlainText(WVRhist,WVRnum,thisoffset,thislen,false)) {
+
+               FoundThisWVR = true
+               newtext = newtext "\nExecuted"
+               break				// jump out of loop to speedup script
+
+            }
+            if (findPlainText(WVRid,WVRnum,thisoffset,thislen,false)) {
+
+               FoundThisWVR = true
+               newtext = newtext "\nIn Implementation"
+               break				// jump out of loop to speedup script
+
+            }
+
+         }   	// end loop over objs in m_DRD  (the DRD module)
+
+         if (!FoundThisWVR) {		// did  not find this WVR in this DRD
+
+// Before we give up, lastly check the Change Record in this DRD, does any object mention this WVR
+
+            for DRDobj in entire m_DRD do {	// ignore view filters and include deleted objs also
+
+               if ( isDeleted DRDobj ) continue			// skip this obj if it is deleted
+
+               DRDhdrtxt = DRDobj."Object Heading"		// get the heading text for this obj
+
+               if (DRDhdrtxt == "Introduction") { break }	// reached Intro, jump out of obj loop
+
+               DRDobjtxt = DRDobj."Object Text"
+               if (findPlainText(DRDobjtxt,WVRnum,thisoffset,thislen,false)) {
+                  FoundThisWVR = true
+                  newtext = newtext "\nExecuted"
+                  break					// jump out of loop to speed up script
+               }
+
+            }	// end of loop over objects in m_DRD (the ICD module)
+
+            if (!FoundThisWVR) {
+               newtext = newtext "\nNot Done"
+            }
+
+         }
+
+
+      } else if (this_doc[0:3] == "ICD ") {	// this doc is an ICD
+
+
+// Look for this ICD module in the "Interfaces" folder
+
+         icd_mod_name = this_doc	// this is the name of the ICD module we're looking for
+         citedMOD = icd_mod_name
+         FoundModule = false
+         thisFolder = folder ICD_Folder
+         m_DRD_name = ""
+
+         loopThroughFolder(thisFolder)
+
+         if (FoundModule) {
+
+// The module is already open. Loop over the objects looking for the change log
+
+            FoundThisWVR = false
+            for DRDobj in m_DRD do {	
+
+               if (number DRDobj > "2") { break }	// jump out of loop when section 2 is reached
+
+               if (cell DRDobj ) {		// is this object a table cell
+
+// Look for this WVR (WVRnum) in the table cells
+
+                  cellText = DRDobj."Object Text"
+                  if (findPlainText(cellText,WVRnum,thisoffset,thislen,false)) {
+                     FoundThisWVR = true
+                     break			// jump out of loop to speed up script
+                  }
+
+               }
+
+            }   	// end loop over objs in m_DRD  (the ICD module)
+
+            if (FoundThisWVR) {			// WVR was found in Change Record in this ICD
+
+               newtext = newtext "\nExecuted"
+
+            } else {				// WVR not found in Change Record in this ICD
+
+               newtext = newtext "\nNot Done"
+
+            }
+
+
+         } else {				// did not find that ICD module
+
+            newtext = newtext "\nNot in DOORS"
+
+         }
+
+
+
+      } else {					// is not DRD or ICD
+
+// Make this implementation status "N/A DOORS"
+
+         newtext = newtext "\nN/A DOORS"
+
+
+      }
+
+
+
+   }		// end of loop over Docs Affected
+
+
+
+// If module open shareable, then try to lock this object
+//   If we cannot lock the object, then it's locked by others, so skip it
+
+   if (openShareable) {
+
+      errMsg = lock o
+      if (!null errMsg) { 			// failed to lock this object
+
+         numSkippedObj++
+         skippedCRs = skippedCRs ", " WVRnum	// assemble list of skipped, to report later
+         continue				// skip this object, jump to next object
+
+      }
+   }
+
+
+// Update the attributes: "Docs Affected", "Docs Status" and "WVR Implementation Status"
+
+   o."Docs Affected" = Docs_Affected		// populate the "Docs Affected" attribute
+   o."Docs Status"   = Docs_Status		// populate the "Docs Status" attribute
+   o."Docs No and Ver"   = Docs_No_Ver		// populate the "Docs No and Ver" attribute
+
+   output_text = newtext[1:]			// drop the 1st char (it is a comma)
+   o."WVR Implementation Status" = output_text
+
+
+
+// Unlock the section containing this object (if we're in shareable edit mode)
+
+   if (openShareable) unlockSaveSection(o)
+
+
+
+} 		// end of loop over objects in the Change Control Log module
+
+
+
+
+//=======================================================================================================
+// Clear memory (because DXL is not good at memory management)
+
+delete (line_re)		// clear memory for regexp
+
+
+//=======================================================================================================
+// Print final output summary  - NONE SO SCRIPT RUNS SILENTLY
+
+if (numSkippedObj > 0) {
+
+   ack numSkippedObj " objects were skipped because they were locked by other users:\n" skippedCRs[1:] ""
+
+}
+
+
+
+
+
+
+
+
+
