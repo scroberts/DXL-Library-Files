@@ -21,7 +21,7 @@ Routines:	The routines contained in this file are...
 Dependencies:	This file draws upon the include file named CRgenutils.dxl.
 
 */
-#include "TMT DXL Scripts/DRD ICD Update/CRgenutils.dxl"
+#include "C:/Program Files/IBM/Rational/DOORS/9.7/lib/dxl/addins/DXL Library Files/TMT DXL Scripts/DRD ICD Update/CRgenutils.dxl"
 
 Skip CRrecords = null
 Skip CRstatus = null
