@@ -2,58 +2,65 @@
 /* 
  Generate Systems Engineering Report: Report Old AD/RD Citations in This Module - for TMT
 
- Description: 	The purpose of this script is to report on the state of AD/RD links in the current DRD module.
-		The script outputs a text file located in the user's current working directory.
-		 
- Process:	The script performs these steps:
-		1) Examines the current module
-		2) Looks for any outlinks in section 1 to the Documents Register
-		3) For each linked document, the script looks for any newer rev of the same document
-			- newer docs are reported so that links might be updated by the module custodian
-		4) The script does not change anything
-			- some links are supposed to point to older versions
-			- any changes are then done by the module custodians 
-		5) Additional output is written to the DXL dialog window - useful for troubleshooting
+ Description: The purpose of this script is to report on the state of AD/RD links in the current DRD module.
+        The script outputs a text file located in the user's current working directory.
 
- Assumptions:	1) the output file is named "SE_report.txt"
-		2) the script only examines the current module - assumed to be a DRD module
-			- unknown errors will occur if the current module is not a DRD module
-		3) the Documents Register module name is hard-coded:
-			"/TMT Requirements/Document and CR Registers/Documents Register"
-		4) the Documents link module name is hard-coded:
-			"/TMT Requirements/Links/Documents"
-		5) the script will close the Documents Register at the end, 
-		   so if you had it open, then it will be closed. we might decide to omit this behavior.
+ Process:   The script performs these steps:
+    1)  Examines the current module, using the current filter
+    2)  Looks for any outlinks in section 1 to the Documents Register
+    3)  For each linked document, the script looks for any newer rev of 
+        the same document
+        - if any are found, the changes are recorded
+    4)  The user is presented with a count and list of changes, and asked
+        whether to proceed with changing.
+        A) if yes, 
+           a) the AD/RD Document ID is changed to the new link found
+           b) the CR ID is changed to "ADMIN" (no matter what it was before)
+    5) Additional output is written to the DXL dialog window - useful 
+        for troubleshooting
+
+ Assumptions:
+    2) the script only examines the current module 
+        - assumed to be a DRD module (unknown errors will occur if the 
+        current module is not a DRD module)
+        - only the objects in Section 1 in the current view are examined
+    3)  the Documents Register module name is hard-coded:
+            "/TMT Requirements/Document and CR Registers/Documents Register"
+    4)  the Documents link module name is hard-coded:
+            "/TMT Requirements/Links/Documents"
+    5)  the script will close the Documents Register at the end, 
+        so if you had it open, then it will be closed. 
 
  If the Script Crashes:
-		If the script crashes, it might leave the Documents Register open.
-		You will not notice this because it is open "hidden".
-		You can easily see all hidden open modules using the DOORS menu item:
-		Tools / Manage Open Modules...
+    If the script crashes, it might leave the Documents Register open.
+    You will not notice this because it is open "hidden".
+    You can easily see all hidden open modules using the DOORS menu item:
+    Tools / Manage Open Modules...
 
- Directions:	1) open the module you want to check for old AD/RD citations
-		2) in that module window, select menu item: Tools / Edit DXL...
-		3) paste this script code into the dialog window and click "Run"
+ Directions:
+    1) open the module you want to check for old AD/RD citations
+    2) in that module window, select menu item: Tools / Edit DXL...
+    3) paste this script code into the dialog window and click "Run"
 
 
 */
-pragma runLim, 0	// suppress DXL execution timeout
+pragma runLim, 0    // suppress DXL execution timeout
 
 
-string filename = "SE_report.txt"		// define output filename
+// string filename = "SE_report.txt"    // define output filename
 
 
 //=======================================================================================================
 // Variable declarations
 
-string Documents_Module 	= "/TMT Requirements/Document and CR Registers/Documents Register"
+string Documents_Module     = "/TMT Requirements/Document and CR Registers/Documents Register"
 Module docModule
-string LinkModuleName 		= "/TMT Requirements/Links/Documents"
+string LinkModuleName       = "/TMT Requirements/Links/Documents"
 Link outLink
 
 int i
-string 		thisModuleName
-Item 		thisModuleItem
+string  thisModuleName
+Item    thisModuleItem
 
 
 Object o
@@ -123,164 +130,239 @@ if (null docModule)
 //=======================================================================================================
 // Check if we can open the output file
 
-output = write filename
-if (null output) {
-   ack "Failed to open output file.  Aborting."
-   close(docModule)			// close the Documents module
-   halt
-}
-print "Output file: " filename "\n"
+// output = write filename
+// if (null output) {
+//    ack "Failed to open output file.  Aborting."
+//    close(docModule)      // close the Documents module
+//    halt
+// }
+// print "Output file: " filename "\n"
 
 
 
 // Begin report
 
-output << "TMT SE Report: Link Status for AD/RD Sections in this module \n"
+// output << "TMT SE Report: Link Status for AD/RD Sections in this module \n"
 string thedate = stringOf(today)
-output << thedate "\n\n"
-// output << stringOf(dateOf intOf today) "\n"		// this adds the time of day, but changes date to xx/xx/xx format
-output << "The IDs reported below are the DOORS IDs for the objects listed. \n\n\n"
+// output << thedate "\n\n"
+// output << stringOf(dateOf intOf today) "\n"     // this adds the time of day, but changes date to xx/xx/xx format
+// output << "The IDs reported below are the DOORS IDs for the objects listed. \n\n\n"
 
 print "Processing: " thisModuleName "\n"
-output << "\nPROCESSING: " thisModuleName "\n"
+// output << "\nPROCESSING: " thisModuleName "\n"
 
-
+int nchanges = 0
+countADRD = 0
+// We need to ask once, change all later.  To avoid repeating the entire 
+// logic (and duplicating it without error) we'll just record the absno 
+// and new link absno in two arrays.  It would be better to do this in a 
+// Skip list, but Skip lists are brain dead as hashes/dicts, so we'll 
+// just do it the old-fashioned way.
+// And just to make it interesting, we'll assume a max number of entries 
+// to change
+int changeAbsno[1000]       // absno in this module
+int changeDocAbsno[1000]    // absno in doc register module
+string outLines[1000]       // will contain a line of info to the user
+// init them just in case
+for i in 0 : 999 do
+{
+    changeAbsno[i] = -1
+    changeDocAbsno[i] = -1
+    outLines[i] = ""
+}
 
 
 //=======================================================================================================
-// Process this module - loop over objects in section 1, examining links to the Documents module
+// Process this module - loop over objects in section 1, examining 
+// links to the Documents module
 
-   countADRD = 0
-   for o in thisModule do {			// loop over the objects in this module
+for o in thisModule do      // loop over the objects in this module, with the current filter
+{
+    obj_number = number(o)        // is a string, e.g. 1.4-2-5 
+    if ( obj_number >= "2" ) break 	// jump out of loop over objects if past section 1
+    obj_absno = o."Absolute Number"
+    obj_objtxt = o."Object Text"
 
-      obj_number = number(o)			// is a string, e.g. 1.4-2-5 
-      if ( obj_number >= "2" ) {break}		// jump out of loop over objects if past section 1
-      obj_absno = o."Absolute Number"
-      obj_objtxt = o."Object Text"
+    for outLink in o->LinkModuleName do   // loop over all outlinks to the Docs module
+    {
+        countADRD++        // count the number of links
 
-
-      for outLink in o->LinkModuleName do	// loop over all outlinks to the Docs module
-      {
-         countADRD++				// count the number of links
-
-         dccDocNo 		= (target outLink)."dccDocNo"
-         DocType 		= (target outLink)."DocType"
-//         dccDocRev 		= (target outLink)."dccDocRev"
-//         dccDocTitle 		= (target outLink)."dccDocTitle"
-         dccDocStatus 		= (target outLink)."dccDocStatus"
-//         DocumentTitle 		= (target outLink)."DocumentTitle"
-         DocumentNo 		= (target outLink)."DocumentNo"
-//         CADDocumentNo 		= (target outLink)."CADDocumentNo"
-//         DocumentRev 		= (target outLink)."DocumentRev"
-//         DocumentHyperlink 	= (target outLink)."DocumentHyperlink"
-//         dccDocHandleHyperlink 	= (target outLink)."dccDocHandleHyperlink"
+        dccDocNo   = (target outLink)."dccDocNo"
+        DocType    = (target outLink)."DocType"
+//         dccDocRev    = (target outLink)."dccDocRev"
+//         dccDocTitle  = (target outLink)."dccDocTitle"
+        dccDocStatus   = (target outLink)."dccDocStatus"
+//         DocumentTitle    = (target outLink)."DocumentTitle"
+        DocumentNo     = (target outLink)."DocumentNo"
+//         CADDocumentNo    = (target outLink)."CADDocumentNo"
+//         DocumentRev  = (target outLink)."DocumentRev"
+//         DocumentHyperlink    = (target outLink)."DocumentHyperlink"
+//         dccDocHandleHyperlink    = (target outLink)."dccDocHandleHyperlink"
 //         dccDocVersionHyperlink = (target outLink)."dccDocVersionHyperlink"
-         link_absno           	= (target outLink)."Absolute Number"
-         link_objtxt            = (target outLink)."Object Text"
-         link_supersede 	= (target outLink)."SupersedingDocument"
+        link_absno             = (target outLink)."Absolute Number"
+        link_objtxt            = (target outLink)."Object Text"
+        link_supersede     = (target outLink)."SupersedingDocument"
 
-         print "   Link from " obj_absno " to " link_absno " is being examined.  \n"
+        print "   Link from " obj_absno " to " 
+        print link_absno " is being examined.  \n"
 
+        // If the cited document is not the "LATEST", then look 
+        // for one labeled as latest.
+        if (dccDocStatus != "LATEST") 
+        {
+            for d in docModule do // loop over all docs in the Docs module
+            {
+                doc_absno = d."Absolute Number"
+                // skip this if it's the linked doc
+                if (doc_absno == link_absno) {continue}  
 
-// If the cited document is not the "LATEST", then look for one labeled as latest.
+                doc_no     = d."dccDocNo"
+                doc_status = d."dccDocStatus"
+                doc_docno  = d."DocumentNo"
+                doc_objtxt = d."Object Text"
 
-         if (dccDocStatus != "LATEST") {
+                titleinfo = doc_objtxt
 
+                // Check if this doc is the same as the linked doc.  
+                //  Note: "same" = both docs using the same dccDocNo 
+                //          or DocumentNo, 
+                //          or object text (if both dccDocNo and 
+                //              DocumentNo are blank)
 
-            for d in docModule do {				// loop over all docs in the Docs module
+                sameDoc = false
+                if (dccDocNo == "") // dccDocNo empty, so check DocumentNo
+                { 
+                    if (DocumentNo == "") 
+                    {
+                        // dccDocNo blank + DocumentNo blank = 
+                        // can't use these to find matching docs.
+                        // Will use the object text, which should be 
+                        // populated with either doc title or other
+                       if (doc_objtxt == link_objtxt) sameDoc = true 
+                    }
+                    else 
+                    {
+                        // dccDocNo blank + DocumentNo's match and 
+                        // are not blank
+                        if (DocumentNo == doc_docno) sameDoc = true 
+                    }
+                } 
+                else // dccDocNo not empty
+                { 
+                    if (dccDocNo == doc_no) { sameDoc = true }
+                }
+                if (sameDoc) // this doc is the same, but different version
+                {
+                    // is this doc marked as latest?
+                    if (doc_status == "LATEST") 
+                    {
+                        //   this is therefore newer than the linked doc
 
-               doc_absno = d."Absolute Number"
+                        newer_absno = doc_absno
+                        print "   Link from DRD ID " obj_absno " to Doc ID "
+                        print link_absno " is old.  Newer is: " doc_absno ""
+                        print "  \n"
+                        if (findPlainText(obj_objtxt,"\n",offset,len,false)) 
+                        {
+                            adrdtitle = obj_objtxt[0:offset-1]
+                        } 
+                        else 
+                        {
+                            adrdtitle = obj_objtxt
+                        }
+                        string outLine = "'" adrdtitle "' change from "
+                        outLine = outLine link_absno " to " doc_absno " \n"
+                        outLines[nchanges] = outLine
+                        changeAbsno[nchanges] = obj_absno 
+                        changeDocAbsno[nchanges] = doc_absno
+                        nchanges++
+// OLDER INTERACTIVE STUFF
+// string message = "  " adrdtitle "\n" 
+// message = message "   needs to be changed from "
+// message = message link_absno " to " doc_absno " \n"
 
-               if (doc_absno == link_absno) {continue}		// skip this if it's the linked doc
-
-               doc_no     = d."dccDocNo"
-               doc_status = d."dccDocStatus"
-               doc_docno  = d."DocumentNo"
-               doc_objtxt = d."Object Text"
-
-               titleinfo = doc_objtxt
-
-
-
-// Check if this doc is the same as the linked doc.  
-//	Note: "same" = both docs using the same dccDocNo or DocumentNo, 
-//                     or object text (if both dccDocNo and DocumentNo are blank)
-
-               sameDoc = false
-               if (dccDocNo == "") {					// dccDocNo empty, so check DocumentNo
-
-                  if (DocumentNo == "") {	// dccDocNo blank + DocumentNo blank = can't use these to find matching docs
-						// will use the object text, which should be populated with either doc title or other
-
-                     if (doc_objtxt == link_objtxt) { sameDoc = true }
-
-
-                  } else {			// dccDocNo blank + DocumentNo's match and are not blank
-
-                     if (DocumentNo == doc_docno) { sameDoc = true }
-
-                  }
-
-               } else {						// dccDocNo not empty
-
-                  if (dccDocNo == doc_no) { sameDoc = true }
-
-               }
-
-               if (sameDoc) {					// this doc is the same, but different version
-                  if (doc_status == "LATEST") {			// is this doc marked as latest
-								//   this is therefore newer than the linked doc
-
-                     newer_absno = doc_absno
-                     print "   Link from DRD ID " obj_absno " to Doc ID " link_absno " is old.  Newer is: " doc_absno "  \n"
-//old                     output << "      Link from DRD ID " obj_absno " to Document ID " link_absno " is old. \n"
-//old                     output << "           Newer Doc is: " doc_absno "\n"
-//old                     output << "           Title:        " titleinfo " \n"
-
-// next lines are new. if it works, then comment out preceding output lines
-
-// Print entry in report - of new document to link to for this object
-//   Include the first line of the AD/RD entry in the DRD module
-
-                     if (findPlainText(obj_objtxt,"\n",offset,len,false)) {
-                        adrdtitle = obj_objtxt[0:offset-1]
-                     } else {
-                        adrdtitle = obj_objtxt
-                     }
-                     output << "  " adrdtitle " needs to be changed from " link_absno " to " doc_absno " \n"
-
-
-
-                     if (link_supersede != "") {
-                        output << "           Original Linked Doc Marked as Superseded by: " link_supersede " \n"
-                     }
-                     if (DocType == "Document (Industry Standard)") {
-                        output << "           Original Linked Doc Marked as INDUSTRY STANDARD \n"
-                     }
-
-                    
-                     doc_status = ""		// clear status to ensure good comparison on next pass in loop
-
-                  }
-               }
-
-
-            }	// end of loop over all docs in Docs module
-
-
-         }
-
-
-      }		// end of loop over outlinks to the Docs module
+// if (link_supersede != "") 
+// {
+    // message = message "           Original Linked Doc Marked as Superseded by: " 
+    // message = message link_supersede " \n"
+// }
+// if (DocType == "Document (Industry Standard)") 
+// {
+    // message = message "           Original Linked Doc Marked as INDUSTRY STANDARD \n"
+// }
+// output << message
+// message = message "Do you want the link updated now?"
+                    }
+                }
 
 
+            }  // end of loop over all docs in Docs module
 
-   }	// end of loop over objects in this module
 
-print "   AD/RD links found in this module: " countADRD "\n"
-output << "      AD/RD links found in this module: " countADRD "\n"
+        }
 
-output << "\n\nEND OF REPORT. \n"
+
+    } // end of loop over outlinks to the Docs module
+
+
+
+}    // end of loop over objects in this module
+
+string message = "AD/RD links found in this module: " countADRD "\n"
+
+int changesToShow = 0
+if (nchanges > 0)
+{
+    message = message "There are " nchanges " changes to be made.  "
+    if (nchanges > 8) 
+    {
+        changesToShow = 8
+        message = message "The first 8 are:\n"
+    }
+    else
+    {
+        changesToShow = nchanges
+        message = message "They are:\n" 
+    }
+    for i in 0:(changesToShow-1) do
+    {
+        message = message "  " outLines[i] ""  // outLine already has /n
+    } 
+    message = message "Do you want to update all " nchanges "?"
+
+    dotheupdate = confirm message
+    if (dotheupdate) 
+    {
+        // check if thisModule open for edit.  halt if not
+        // do the UPDATE
+        // ack it with new value quoted to user
+        if (!isEdit(thisModule))
+        {
+            message = "this module not open for edit.  "
+            message = message "Open for edit and try again"
+            ack message
+            halt
+        }
+        for i in 0:(nchanges-1) do
+        {
+            o = object(changeAbsno[i], thisModule)
+            o."AD/RD Document ID" = changeDocAbsno[i] ""
+            o."CR ID" = "ADMIN"
+        }
+        message = "Made " nchanges " changes during this script run\n"
+        message = message "   Save module when closing if you want to keep changes"
+        ack message
+    }
+    else
+    {
+        warningBox "Did not update"
+    }
+}
+else
+{
+    message = message "  No changes were found to be needed"
+    ack message
+}
 
 
 
@@ -290,7 +372,7 @@ output << "\n\nEND OF REPORT. \n"
 
 
 
-close(docModule)			// close the Documents module
+close(docModule)            // close the Documents module
 
 
 
